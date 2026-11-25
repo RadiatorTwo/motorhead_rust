@@ -75,6 +75,9 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
 
 ## How it works (this game's own)
 
+- `src/frames.rs` the race at 60 Hz logic, pictures between logic frames (0x4775d8 drawn
+  again, static data put back) paced to the display (max 240 fps); `src/pictures.rs` cars
+  and camera interpolated while drawing.
 - `src/loaded.rs` the interpreter for loaded code; `src/font.rs`, `src/sprites.rs` the
   replaced drawers (each the game's loop, registers carried as in the original).
 - Framework changes made here (not yet in recomp_kit, see PLAN.md "Kit"): Watcom sections
