@@ -1,0 +1,14 @@
+# What is known about the game, by address of the reference version (hex): name and a short
+# description; "?" marks a guess. Only addresses, names and descriptions: nothing of the EXE.
+0x4c5d0e _wstart_  Watcom start-up; WinMain is 0x471678 (stored in [0x80cc0c])
+0x471678 WinMain
+0x4cde6f wcrt_pow10_table  Watcom runtime: `call; pop edi; ret` gives edi = the table after the call (hooked)
+0x415878 Font_DrawString  draws [0x4d37c8] at [0x4d37d0] with the font [0x4d37cc] (glyphs are code: hooked, font.rs)
+0x415918 Font_GlyphLoop  the loop each glyph's code jumps back to
+0x4ba0ec Font_Load  loads a FONT*.FNT and points each glyph's last jump at 0x415918
+0x410010 Sprite_DrawClipped  sprite [0x513ef0] of set [0x513ee4] at ([0x513ee8], [0x513eec]), clipped top and bottom (rows are code: hooked, sprites.rs)
+0x41009a Sprite_DrawStep  the same, a row every [0x513efc] bytes
+0x410113 Sprite_DrawList  [0x513efc] rows from the list [0x513ef8]
+0x433624 DD_EnumModesCallback  EnumDisplayModes callback (menu wants 640x480 or 640x400 at 8 bits)
+0x4d37b4 font_depth  0: 8-bit pixels, 1: 16-bit
+0x513ed8 spr_base  the 2D picture: first byte; 0x513edc bytes a row; 0x513ee0 rows; 0x513f00 its end

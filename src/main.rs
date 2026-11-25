@@ -1,0 +1,94 @@
+//! Motorhead recompiled to native code with recomp_kit.
+//!
+//! ```text
+//! motorhead [path to the EXE]     the game (default: game_files next to the program)
+//! ```
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod font;
+mod hooks;
+mod loaded;
+mod sprites;
+
+use recomp::smc::SmcSpec;
+use recomp::ver::Version;
+use win32::{Game, Identity};
+
+/// The versions of the game's EXE this port knows; the first is the reference version: every
+/// address in this crate (hooks, symbols.txt) is one of its addresses (`Us(0x...)`).
+static VERSIONS: [Version; 1] = [Version {
+    // motor.exe from the Motorhead CD (Digital Illusions CE / Gremlin, 1998), Watcom C
+    sha256: "c27411fd7305f757f01171ad7227d05219cbec5073a87b23849019ca854d7a1c",
+    name: "EU",
+    map: None,
+}];
+
+static ID: Identity = Identity {
+    title: "Motorhead",
+    env_prefix: "MOTORHEAD",
+    exe: "motor.exe",
+    versions: &VERSIONS,
+    // where the original installer put the game (GetModuleFileName answers with it)
+    install_dir: r"C:\Motorhead",
+    // the game folder's name in game_files
+    folder: "Motorhead",
+    cd_folder: None,
+    // the CD's volume label ("Please insert Motorhead CD!"); the serial is not known yet
+    cd: Some(("Motorhead", 0x1998_0001)),
+    computer_name: "PC",
+    // the game keeps its settings in game\MotorHead.CFG; the registry only holds A3D's key
+    registry_key: r"HKEY_LOCAL_MACHINE\Software\Gremlin\Motorhead",
+    registry_seed: &[],
+    // files and folders next to the EXE without which the game cannot start
+    required: &["Data", "Cars", "Tracks", "Game", "Sounds", "League", "SMACKW32.DLL"],
+    // other files kept in the game folder (saves, the game's own settings)
+    game_files: &[],
+    // the movies stay on the CD (movies\movies.pak)
+    video_marker: None,
+    // network discovery (DirectPlay over UDP): 8 bytes of the game's own, question and answer
+    net_magic: (b"MOTORHD?", b"MOTORHD!"),
+    log_file: "motorhead.log",
+};
+
+struct MyGame;
+
+impl Game for MyGame {
+    fn identity(&self) -> &'static Identity {
+        &ID
+    }
+
+    fn functions(&self, img: &recomp::image::Image) -> Vec<(u32, u32, String)> {
+        // a Ghidra export, when there is one (only function boundaries: fine to commit):
+        // recomp::image::load_functions(include_str!("../data/functions.json"))
+        let mut code = recomp::discover::Code::new(img);
+        let mut seeds = vec![(img.entry, "entry".into())];
+        seeds.extend(win32::platform::module::seeds());
+        recomp::discover::find_functions(&mut code, &seeds)
+    }
+
+    fn smc(&self) -> SmcSpec {
+        // self-modifying code beyond `mov [code], x` (see `rtools smc`)
+        SmcSpec::default()
+    }
+
+    fn dlls(&self) -> &'static [(&'static str, u32)] {
+        // RAD's Smacker player the game shipped with (its videos in movies\movies.pak); it
+        // wants 0x10000000, inside our heap
+        &[("SMACKW32.DLL", 0x5f40_0000)]
+    }
+
+    fn hooks(&self) -> Vec<(u32, recomp::rt::Hook)> {
+        hooks::all()
+    }
+
+    fn on_start(&self) {
+        recomp::image::set_symbols(include_str!("../data/symbols.txt"));
+    }
+}
+
+static GAME: MyGame = MyGame;
+
+fn main() {
+    win32::run(&GAME)
+}
