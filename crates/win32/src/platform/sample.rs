@@ -72,6 +72,7 @@ fn sample(h: windows_sys::Win32::Foundation::HANDLE) {
     let mut insns: HashMap<u32, u32> = HashMap::new();
     let mut modules = HashMap::new();
     let mut total = 0u32;
+    let mut windows = 0u32;
     let mut stack = vec![0u8; 64 << 10];
     let mut stack_len;
     let mut last = std::time::Instant::now();
@@ -193,9 +194,11 @@ fn sample(h: windows_sys::Win32::Foundation::HANDLE) {
             v.sort_unstable_by(|a, b| b.1.cmp(&a.1));
             log!("sample: {total} samples, {}", super::stats::summary());
             if let Some(path) = recomp::config::env("SAMPLE_RAW") {
-                // every sample's name, for symbolising our own addresses against the link map
+                // every sample's name, for symbolising our own addresses against the link map:
+                // a file per 2 s (`<path>.<n>`)
+                windows += 1;
                 let _ = std::fs::write(
-                    path,
+                    format!("{path}.{windows}"),
                     v.iter()
                         .map(|(k, n)| format!("{n} {k}\n"))
                         .collect::<String>(),

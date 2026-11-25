@@ -8,6 +8,7 @@
 
 mod font;
 mod frames;
+mod pictures;
 mod hooks;
 mod loaded;
 mod sprites;

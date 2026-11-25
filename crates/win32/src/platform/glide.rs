@@ -146,7 +146,7 @@ struct Texture {
     staged: Vec<u8>,
     staged_alpha: Vec<u8>,
     pending: Option<(u32, u32)>,
-    /// the palette (`Glide::palette_stamp`) its texels were converted with (P_8, AP_88)
+    /// the palette's hash (`Glide::palette_stamp`) its texels were converted with (P_8, AP_88)
     pal_stamp: u64,
 }
 
@@ -261,8 +261,9 @@ struct Glide {
     aniso_max: f32,
     textures: BTreeMap<u32, Texture>,
     downloads: u64,
-    /// the texture palette (grTexDownloadTable, 0RGB) and a count of its changes: textures
-    /// of a palette format are converted again when drawn after it changed
+    /// the texture palette (grTexDownloadTable, 0RGB) and a hash of it (`palette_hash`):
+    /// textures of a palette format are converted again when drawn with another palette than
+    /// the one they were converted with
     palette: Vec<u32>,
     palette_stamp: u64,
     state: State,
@@ -318,6 +319,8 @@ struct Local {
     empty: glow::VertexArray,
     fbos: HashMap<(bool, u64), glow::Framebuffer>,
     copy: [glow::Framebuffer; 2],
+    /// the picture at the Glide screen's size, for reading it back (`read_screen`)
+    read: Option<(glow::Framebuffer, glow::Renderbuffer, (u32, u32))>,
 }
 
 impl Local {
@@ -334,6 +337,7 @@ impl Local {
                 empty,
                 fbos: HashMap::new(),
                 copy: [fbo(), fbo()],
+                read: None,
             }
         }
     }
@@ -345,6 +349,10 @@ impl Local {
             gl.delete_vertex_array(self.empty);
             for f in self.fbos.into_values().chain(self.copy) {
                 gl.delete_framebuffer(f);
+            }
+            if let Some((f, rb, _)) = self.read {
+                gl.delete_framebuffer(f);
+                gl.delete_renderbuffer(rb);
             }
         }
     }
@@ -1064,7 +1072,7 @@ impl Glide {
                 textures: BTreeMap::new(),
                 downloads: 0,
                 palette: vec![0; 256],
-                palette_stamp: 1,
+                palette_stamp: palette_hash(&[0; 256]),
                 cc: [1, 0, 0, 0, 0],
                 ac: [1, 0, 0, 0, 0],
                 constant: 0xffff_ffff,
@@ -1134,6 +1142,38 @@ impl Glide {
                 );
                 f
             })
+    }
+
+    /// This thread's framebuffer at the Glide screen's size, for reading the picture back.
+    fn read_fbo(&mut self, gl: &glow::Context) -> glow::Framebuffer {
+        let size = self.res;
+        let l = self.local(gl);
+        if let Some((f, _, s)) = l.read {
+            if s == size {
+                return f;
+            }
+        }
+        unsafe {
+            if let Some((f, rb, _)) = l.read.take() {
+                gl.delete_framebuffer(f);
+                gl.delete_renderbuffer(rb);
+            }
+            let rb = gl.create_renderbuffer().expect("GL renderbuffer");
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(rb));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, size.0 as i32, size.1 as i32);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            let f = gl.create_framebuffer().expect("GL framebuffer");
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(f));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(rb),
+            );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            l.read = Some((f, rb, size));
+            f
+        }
     }
 
     /// This thread's framebuffer drawing into the multisampled renderbuffer, if there is one.
@@ -1666,35 +1706,52 @@ impl Glide {
     fn read_screen(&mut self, gl: &glow::Context) -> Vec<u32> {
         self.flush(gl);
         self.resolve(gl);
-        let (tw, th) = self.target;
-        let mut px = vec![0u8; (tw * th * 4) as usize];
-        let fbo = self.color_fbo(gl);
+        // the view's rectangle brought down to the screen's size on the GPU (nearest pixel)
+        // and only that read back: reading the whole target (up to the window's size) and
+        // picking its pixels here was ~30% of a race in Motorhead, which reads the screen
+        // every picture
+        let th = self.target.1 as f32;
+        let ([vx, vy, vw, vh], _) = self.view_rect();
+        let (w, h) = self.res;
+        let src = self.color_fbo(gl);
+        let dst = self.read_fbo(gl);
+        let mut px = vec![0u8; (w * h * 4) as usize];
         unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+            gl.disable(glow::SCISSOR_TEST);
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(src));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(dst));
+            // (GL rows from the bottom)
+            gl.blit_framebuffer(
+                vx.round() as i32,
+                (th - vy - vh).round() as i32,
+                (vx + vw).round() as i32,
+                (th - vy).round() as i32,
+                0,
+                0,
+                w as i32,
+                h as i32,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(dst));
             gl.read_pixels(
                 0,
                 0,
-                tw as i32,
-                th as i32,
+                w as i32,
+                h as i32,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
                 glow::PixelPackData::Slice(Some(&mut px)),
             );
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
-        // nearest target pixel of each screen pixel, in the view's rectangle (GL rows from
-        // the bottom)
-        let ([vx, vy, vw, vh], _) = self.view_rect();
-        let (w, h) = self.res;
         let mut out = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
-            let ty = (vy + (y as f32 + 0.5) * vh / h as f32) as u32;
-            let row = th - 1 - ty.min(th - 1);
-            for x in 0..w {
-                let tx = ((vx + (x as f32 + 0.5) * vw / w as f32) as u32).min(tw - 1);
-                let p = ((row * tw + tx) * 4) as usize;
-                out.push((px[p] as u32) << 16 | (px[p + 1] as u32) << 8 | px[p + 2] as u32);
-            }
+            let row = &px[((h - 1 - y) * w * 4) as usize..][..(w * 4) as usize];
+            out.extend(
+                row.chunks_exact(4)
+                    .map(|p| (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32),
+            );
         }
         out
     }
@@ -2818,9 +2875,22 @@ fn table(ty: u32, data: u32, start: u32, end: u32) {
             g.palette[i as usize] = v;
         }
         if changed {
-            g.palette_stamp += 1;
+            g.palette_stamp = palette_hash(&g.palette);
         }
     });
+}
+
+/// A palette's contents as a number (FNV-1a; never 0, a texture's "converted with none").
+/// Not a count of changes: a game that switches between palettes (Motorhead: A, B, A...) would
+/// have every texture converted and uploaded again at each switch, ~60% of its time in a race.
+fn palette_hash(p: &[u32]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &v in p {
+        for b in v.to_le_bytes() {
+            h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    h | 1
 }
 
 /// grGlideGetVersion(char[80]): the version of the Glide 2 the game expects.

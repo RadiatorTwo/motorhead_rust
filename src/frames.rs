@@ -19,6 +19,7 @@
 
 use recomp::rt::{Cpu, ESP, call_original};
 use recomp::ver::Us;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use win32::GlideExt;
@@ -37,7 +38,7 @@ const CLOCK: Us = Us(0x7e9f9c);
 /// The race's drawing: the buffer swap (the last picture shown), then the track, the cars and
 /// the HUD drawn through the renderer's table (`[[0x77d95c] + 0x298]`; Glide's at 0x505eb0,
 /// swap at +0x28). No arguments; the camera is set before it (0x4775ad..0x4775be).
-const RACE_DRAW: Us = Us(0x4775d8);
+pub const RACE_DRAW: Us = Us(0x4775d8);
 
 /// The logic rate: frames a second.
 const RATE: u32 = 60;
@@ -88,6 +89,7 @@ pub fn race_frame(c: &mut Cpu) {
         .is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
     if new {
         LOGIC.reset();
+        crate::pictures::forget();
         FRAME.store(0, std::sync::atomic::Ordering::Relaxed);
         // a recording's start: the whole game saved, or loaded in a replay
         input_clock::start(c);
@@ -102,17 +104,48 @@ pub fn race_frame(c: &mut Cpu) {
             dump(&format!("{path}.{f}"));
         }
     }
+    let t0 = Instant::now();
     call_original(c, RACE_FRAME.at());
+    if race_log() {
+        FRAME_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+}
+
+/// A picture between logic frames is being drawn.
+static PICTURE: AtomicBool = AtomicBool::new(false);
+
+/// The race's drawing, the frame's own and each picture's: the race shown a frame late
+/// (`pictures`). The frame's own drawing notes where everything is first.
+pub fn race_draw(c: &mut Cpu) {
+    if !PICTURE.load(Ordering::Relaxed) {
+        crate::pictures::noted(FRAME.load(Ordering::Relaxed));
+    }
+    let alpha = LOGIC.alpha(PACER.next_shown());
+    crate::pictures::draw(alpha, || call_original(c, RACE_DRAW.at()));
 }
 
 /// A picture between logic frames: the race's drawing again, everything it changed in the
 /// game's static data put back (no other guest thread runs meanwhile).
 fn picture(c: &mut Cpu) {
+    let t0 = Instant::now();
+    picture_inner(c);
+    if race_log() {
+        PICTURE_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+}
+
+/// Time spent in pictures and in logic frames (with their own drawing), for `RACE_LOG`.
+pub static PICTURE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static FRAME_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn picture_inner(c: &mut Cpu) {
     let regs = tween::save(c);
     let saved = STATICS.each_ref().map(Statics::save);
+    PICTURE.store(true, Ordering::Relaxed);
     hold_turn(true);
     guest_call(c, RACE_DRAW.at(), &[]);
     hold_turn(false);
+    PICTURE.store(false, Ordering::Relaxed);
     for (s, v) in STATICS.iter().zip(saved) {
         s.restore(v);
     }
