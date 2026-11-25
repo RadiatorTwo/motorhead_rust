@@ -64,6 +64,8 @@ impl Game for MyGame {
         let mut code = recomp::discover::Code::new(img);
         let mut seeds = vec![(img.entry, "entry".into())];
         seeds.extend(win32::platform::module::seeds());
+        // every hooked function is one (0x41009a is called only through a pointer)
+        seeds.extend(hooks::all().into_iter().map(|(a, _)| (a, format!("hook_{a:x}"))));
         recomp::discover::find_functions(&mut code, &seeds)
     }
 

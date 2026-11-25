@@ -20,7 +20,12 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 
 ## 3. Playing
 
-- [ ] the first race starts and plays (Glide; 3D drawers may jump into loaded code too)
+- [x] the attract demo races in Glide (512x384) with textures (2026-11-25: P_8 textures and
+  grTexDownloadTable were missing in glide.rs)
+- [ ] a race of the player's own (needs a recording, `MOTORHEAD_RECORD`)
+- [ ] crash seen once in the demo, not again in ~6 runs: read at 0x2e4 in 0x46fc88 (a
+  track/spline object with [+4] = 0; 0x4710xx frees such an object and zeroes [+4]).
+  Watch for it.
 - [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound (waveOut: none)
 - [ ] saving and loading (league, records)
 - [ ] the whole game played through
@@ -55,6 +60,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
   CreateProcessA/LoadModule (not started), console (none), GetProfileIntA.
 - `user32.rs`: keyboard (GetKeyNameTextA, MapVirtualKeyA, ToAscii, Get/SetKeyboardState,
   layout name), clipboard (none), small ones. `advapi32.rs`: RegOpenKeyA.
+
+## Kit (not yet taken over)
+
+- `glide.rs`: palette textures (P_8, AP_88) through grTexDownloadTable(/Partial), converted
+  again when drawn after the palette changed; grGlideGetVersion, grBufferNumPending.
 
 ## Learned
 

@@ -146,6 +146,8 @@ struct Texture {
     staged: Vec<u8>,
     staged_alpha: Vec<u8>,
     pending: Option<(u32, u32)>,
+    /// the palette (`Glide::palette_stamp`) its texels were converted with (P_8, AP_88)
+    pal_stamp: u64,
 }
 
 /// Layers of the texture array at first: TMU memory holds 64 textures of 256x256 at 8 bits.
@@ -259,6 +261,10 @@ struct Glide {
     aniso_max: f32,
     textures: BTreeMap<u32, Texture>,
     downloads: u64,
+    /// the texture palette (grTexDownloadTable, 0RGB) and a count of its changes: textures
+    /// of a palette format are converted again when drawn after it changed
+    palette: Vec<u32>,
+    palette_stamp: u64,
     state: State,
     /// Vertex attributes, so that changing them draws nothing yet: the colour and alpha
     /// combine units (function, factor, local, other, invert), the constant colour (ARGB) and
@@ -761,9 +767,15 @@ fn lod_size(lod: u32, aspect: u32) -> (u32, u32) {
     }
 }
 
-/// Texels of a format as RGBA bytes (alpha 255 where the format has none).
-fn convert(format: u32, data: u32, n: usize) -> Vec<u8> {
-    let m = mem();
+/// Texels of a format as RGBA bytes (alpha 255 where the format has none); P_8 and AP_88
+/// through `palette` (0RGB).
+fn convert(format: u32, src: &[u8], n: usize, palette: &[u32]) -> Vec<u8> {
+    let rd8 = |k: u32| src[k as usize];
+    let rd16 = |k: u32| u16::from_le_bytes([src[k as usize], src[k as usize + 1]]);
+    let pal = |i: u8| {
+        let c = palette[i as usize];
+        [(c >> 16) as u8, (c >> 8) as u8, c as u8]
+    };
     let e5 = |v: u32| ((v << 3) | (v >> 2)) as u8;
     let e6 = |v: u32| ((v << 2) | (v >> 4)) as u8;
     let e4 = |v: u32| (v * 17) as u8;
@@ -771,7 +783,7 @@ fn convert(format: u32, data: u32, n: usize) -> Vec<u8> {
     for k in 0..n as u32 {
         let px: [u8; 4] = match format {
             0xb => {
-                let v = m.rd16(data + 2 * k) as u32;
+                let v = rd16(2 * k) as u32;
                 [
                     e5(v >> 10 & 31),
                     e5(v >> 5 & 31),
@@ -780,20 +792,20 @@ fn convert(format: u32, data: u32, n: usize) -> Vec<u8> {
                 ]
             }
             0xa => {
-                let v = m.rd16(data + 2 * k) as u32;
+                let v = rd16(2 * k) as u32;
                 [e5(v >> 11), e6(v >> 5 & 63), e5(v & 31), 255]
             }
             0xc => {
-                let v = m.rd16(data + 2 * k) as u32;
+                let v = rd16(2 * k) as u32;
                 [e4(v >> 8 & 15), e4(v >> 4 & 15), e4(v & 15), e4(v >> 12)]
             }
             0xd => {
-                let v = m.rd16(data + 2 * k);
+                let v = rd16(2 * k);
                 let i = v as u8;
                 [i, i, i, (v >> 8) as u8]
             }
             0 => {
-                let v = m.rd8(data + k) as u32;
+                let v = rd8(k) as u32;
                 [
                     (v >> 5) as u8 * 36,
                     (v >> 2 & 7) as u8 * 36,
@@ -801,16 +813,49 @@ fn convert(format: u32, data: u32, n: usize) -> Vec<u8> {
                     255,
                 ]
             }
-            2 => [255, 255, 255, m.rd8(data + k)],
+            2 => [255, 255, 255, rd8(k)],
             3 => {
-                let i = m.rd8(data + k);
+                let i = rd8(k);
                 [i, i, i, 255]
+            }
+            // P_8
+            5 => {
+                let [r, g, b] = pal(rd8(k));
+                [r, g, b, 255]
+            }
+            // AP_88
+            0xe => {
+                let v = rd16(2 * k);
+                let [r, g, b] = pal(v as u8);
+                [r, g, b, (v >> 8) as u8]
             }
             _ => [255, 0, 255, 255],
         };
         out.extend(px);
     }
     out
+}
+
+/// Converted texels (rgba) of rows r0..=r1 into a texture's staged top level, to go up at its
+/// next draw: premultiplied by coverage (a black texel is keyed out), the alpha apart.
+fn stage(t: &mut Texture, r0: u32, r1: u32, px: &[u8]) {
+    let at = (r0 * t.w) as usize;
+    let (rgb, alpha) = (&mut t.staged[at * 4..], &mut t.staged_alpha[at * 2..]);
+    for (k, p) in px.chunks_exact(4).enumerate() {
+        let covered = p[..3] != [0, 0, 0];
+        rgb[4 * k..4 * k + 4].copy_from_slice(&if covered {
+            [p[0], p[1], p[2], 255]
+        } else {
+            [0; 4]
+        });
+        alpha[2 * k..2 * k + 2].copy_from_slice(&if covered { [p[3], 0] } else { [0, p[3]] });
+    }
+    t.pending = Some(t.pending.map_or((r0, r1), |(a, b)| (a.min(r0), b.max(r1))));
+}
+
+/// Whether a texture format reads the palette.
+fn paletted(format: u32) -> bool {
+    matches!(format, 5 | 0xe)
 }
 
 /// 0xRRGGBB as a 565 pixel.
@@ -1018,6 +1063,8 @@ impl Glide {
                 aniso_max,
                 textures: BTreeMap::new(),
                 downloads: 0,
+                palette: vec![0; 256],
+                palette_stamp: 1,
                 cc: [1, 0, 0, 0, 0],
                 ac: [1, 0, 0, 0, 0],
                 constant: 0xffff_ffff,
@@ -1503,6 +1550,7 @@ impl Glide {
         // MAX_LAYERS) and the replacement's layer + 1, its size
         let bytes = |u: [u32; 5]| u[0] | u[1] << 8 | u[2] << 16 | u[3] << 24;
         if let Some(a) = self.tex {
+            self.repalette(a);
             self.commit(gl, a);
         }
         let tex = self.tex.and_then(|a| self.textures.get(&a));
@@ -1889,6 +1937,7 @@ impl Glide {
                         staged: vec![0; (w * h * 4) as usize],
                         staged_alpha: vec![0; (w * h * 2) as usize],
                         pending: None,
+                        pal_stamp: 0,
                     },
                 );
                 layer
@@ -1901,13 +1950,9 @@ impl Glide {
             t.known[r0 as usize..=r1 as usize].fill(true);
         }
         let n = ((r1 - r0 + 1) * w) as usize;
-        let mut px = convert(format, data, n);
-        let key = super::hd::hash(
-            format,
-            w,
-            r1 - r0 + 1,
-            mem().slice(data, n * bytes_per_texel(format) as usize),
-        );
+        let bytes_in = mem().slice(data, n * bytes_per_texel(format) as usize);
+        let mut px = convert(format, bytes_in, n, &self.palette);
+        let key = super::hd::hash(format, w, r1 - r0 + 1, bytes_in);
         if let Some(x) = crate::game::game().glide() {
             x.recolour(key, &mut px);
         }
@@ -1918,25 +1963,30 @@ impl Glide {
             .collect();
         super::hd::dump(key, w, r1 - r0 + 1, &original);
         let t = self.textures.get_mut(&addr).unwrap();
-        let at = (r0 * w) as usize;
-        let (rgb, alpha) = (&mut t.staged[at * 4..], &mut t.staged_alpha[at * 2..]);
-        // premultiplied by coverage: a black texel is keyed out
-        for (k, p) in px.chunks_exact(4).enumerate() {
-            let covered = p[..3] != [0, 0, 0];
-            rgb[4 * k..4 * k + 4].copy_from_slice(&if covered {
-                [p[0], p[1], p[2], 255]
-            } else {
-                [0; 4]
-            });
-            alpha[2 * k..2 * k + 2].copy_from_slice(&if covered { [p[3], 0] } else { [0, p[3]] });
-        }
-        t.pending = Some(t.pending.map_or((r0, r1), |(a, b)| (a.min(r0), b.max(r1))));
+        t.pal_stamp = self.palette_stamp;
+        stage(t, r0, r1, &px);
         // the replacements read the original's layer: up at once
         if self.hd.is_some() {
             self.flush(gl);
             self.commit(gl, addr);
             self.replace(gl, addr, key, (r0, r1), &original);
         }
+    }
+
+    /// A texture of a palette format drawn after the palette changed: its texels converted
+    /// again with the palette now (Glide looks them up when drawing).
+    fn repalette(&mut self, addr: u32) {
+        let (palette, stamp) = (&self.palette, self.palette_stamp);
+        let Some(t) = self.textures.get_mut(&addr) else {
+            return;
+        };
+        if !paletted(t.format) || t.pal_stamp == stamp || !t.known.iter().all(|&k| k) {
+            return;
+        }
+        let px = convert(t.format, &t.raw, (t.w * t.h) as usize, palette);
+        t.pal_stamp = stamp;
+        let h = t.h;
+        stage(t, 0, h - 1, &px);
     }
 
     /// Twice the layers (all textures in use, TMU memory not full): new arrays, every texture
@@ -2739,6 +2789,46 @@ fn tex_download_mipmap_level_partial(c: &mut Cpu) -> u32 {
     0
 }
 
+/// grTexDownloadTable(tmu, type, data): the palette (GR_TEXTABLE_PALETTE, 2: 256 0RGB
+/// entries); NCC tables (0, 1) are not done (their YIQ textures are drawn magenta).
+fn tex_download_table(c: &mut Cpu) -> u32 {
+    table(arg(c, 1), arg(c, 2), 0, 255);
+    0
+}
+
+/// grTexDownloadTablePartial(tmu, type, data, start, end): entries start..=end of the table at
+/// data.
+fn tex_download_table_partial(c: &mut Cpu) -> u32 {
+    table(arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4));
+    0
+}
+
+fn table(ty: u32, data: u32, start: u32, end: u32) {
+    if ty != 2 {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| log!("glide: NCC tables (grTexDownloadTable type {ty}) not done"));
+        return;
+    }
+    let m = mem();
+    with(|g, _| {
+        let mut changed = false;
+        for i in start..=end.min(255) {
+            let v = m.rd32(data + 4 * i) & 0xff_ffff;
+            changed |= g.palette[i as usize] != v;
+            g.palette[i as usize] = v;
+        }
+        if changed {
+            g.palette_stamp += 1;
+        }
+    });
+}
+
+/// grGlideGetVersion(char[80]): the version of the Glide 2 the game expects.
+fn glide_get_version(c: &mut Cpu) -> u32 {
+    super::put_cstr(arg(c, 0), "2.43", 80);
+    0
+}
+
 fn tex_source(c: &mut Cpu) -> u32 {
     let addr = arg(c, 1);
     with(|g, _| g.tex = Some(addr));
@@ -2817,6 +2907,11 @@ const FUNCTIONS: &[(&str, fn(&mut Cpu) -> u32)] = &[
         tex_download_mipmap_level_partial,
     ),
     ("grTexSource", tex_source),
+    ("grTexDownloadTable", tex_download_table),
+    ("grTexDownloadTablePartial", tex_download_table_partial),
+    ("grGlideGetVersion", glide_get_version),
+    // pictures are shown by the present thread: none waits in a queue
+    ("grBufferNumPending", ret0),
 ];
 
 /// GetProcAddress on glide2x.dll: a thunk for the name (`_grName@argbytes`).

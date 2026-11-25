@@ -62,6 +62,9 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
   and the loaded code runs in a small interpreter (`loaded.rs`: mov, add/sub/and/or/xor,
   inc/dec, lea, fst qword, ret/jmp). If other code jumps into loaded code: "call to unknown
   address" in the heap; find the caller and do the same.
+- Glide (config `Renderer voodoo`, `TextureFormat 8`): textures are P_8 with a palette
+  (grTexDownloadTable). In the menu the game plays a demo after a while (Demos\*.MDE): a
+  race to look at without a recording.
 - Watcom runtime 0x4cde6f: `call +x` over a table, `pop edi; ret` (hooked: `pow10_table`).
 
 ## How it works (this game's own)
