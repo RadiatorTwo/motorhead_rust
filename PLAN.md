@@ -1,16 +1,21 @@
 # PLAN — Motorhead
 
-## Now (2026-11-25, end of session)
+## Now (2026-11-26, end of session)
 
-- Last commit 388335a (main, 2 commits not pushed: 7e766ed Glide palettes, 388335a frames).
-- Waiting for the user's new recording `rec3.txt` (+ `rec3.txt.1.state`) made with
-  `$env:MOTORHEAD_RECORD="rec3.txt"; .	argetelease\motorhead.exe`. Then: replay it
-  (`MOTORHEAD_INPUT=@rec3.txt`, with the user's settings, screenshots only) and go on with the
-  graphics (pictures between logic frames, GUIDE 8b step 3; then speed, widescreen).
-- Ask before every game start (each opens a window on the user's screen; runs are slow).
+- Pictures between logic frames work: ~220–240 fps on the user's 480 Hz display (limit 240),
+  cars and camera interpolated, the race log of rec3 unchanged. The user saw no problems
+  (sound, gameplay). Next: the user plays a race and looks for stutter or lag (the names over
+  the cars, the wheels, the HUD's map are not interpolated); then widescreen / resolution.
+- Test runs need no asking any more (the user's standing go, 2026-11-25). Launch with
+  `Start-Process -Wait` (GUI exe: PowerShell does not wait otherwise).
+- Replays: `MOTORHEAD_INPUT=@rec3.txt` (+ `rec3.txt.1.state`), `MOTORHEAD_RACE_LOG=60`;
+  compare the `race *` lines with an earlier run (1342 lines). Times after `sync@0` are ms.
+  `RACE_LOG` itself causes ~50 ms spikes: measure speed without it.
+- Profiling our own code: build with a link map into `target-map` (GUIDE 8a), run with
+  `MOTORHEAD_SAMPLE=1 MOTORHEAD_SAMPLE_RAW=<file>` (a file per 2 s), resolve against the map.
 - Open: crash seen twice in 10 runs (0x46fc88 path object; diagnostic hook logs it); the
   menu part of a replay runs in real time (an early Enter may miss the intro skip); kit
-  changes below not yet in recomp_kit (Glide palettes, input clock, savestate files).
+  changes below not yet in recomp_kit.
 
 The way through: recomp_kit's docs/GUIDE.md. Tick off what is done, note what was learned.
 Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
@@ -38,8 +43,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
   0x474a10 paced) and recordings that play the same: input in logic frames
   (`input_clock`), a savestate at the race's first frame next to the recording
   (`recN.txt.1.state`). Checked 2026-11-25: two replays the same for 3540 frames.
-- [ ] a race of the player's own recorded with this (rec1/rec2 are from before: no savestate)
-- [ ] pictures between logic frames (GUIDE 8b step 3; for now at most 60 fps)
+- [x] a race of the player's own recorded with this: rec3 replays the same twice over the
+  whole race (2026-11-25)
+- [x] pictures between logic frames (2026-11-26): the race's drawing 0x4775d8 runs again
+  while the next frame is not due, the static data put back (`frames.rs`); cars and camera
+  interpolated (`pictures.rs`)
 - [ ] crash seen once in the demo, not again in ~6 runs: read at 0x2e4 in 0x46fc88 (a
   track/spline object with [+4] = 0; 0x4710xx frees such an object and zeroes [+4]).
   Watch for it.
@@ -81,7 +89,16 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 ## Kit (not yet taken over)
 
 - `glide.rs`: palette textures (P_8, AP_88) through grTexDownloadTable(/Partial), converted
-  again when drawn after the palette changed; grGlideGetVersion, grBufferNumPending.
+  again when drawn with another palette than they were converted with (`palette_hash`: by
+  content, not a count of changes; Motorhead switches palettes and had every texture
+  converted and uploaded again at each switch, ~60% of a race); grGlideGetVersion,
+  grBufferNumPending.
+- `glide.rs` `read_screen` (grLfbLock for reading, grLfbReadRegion): the view brought down to
+  the Glide screen's size on the GPU (blit, nearest) and only that read back (`read_fbo`):
+  reading the whole window-sized target was ~30% of a race.
+- `tween.rs` `Statics`: a buffer per range (an image with a gap between its parts needs one
+  `Statics` per part: Motorhead's DGROUP and .bss; reading the gap crashed).
+- `sample.rs`: `SAMPLE_RAW` writes a file per 2 s (`<path>.<n>`), not only the last.
 - `input_clock.rs` (new): the time INPUT and RECORD count in (logic frames in a game's loop,
   input let through at frames' starts), `sync` points, `start` (savestate saved with a
   recording, loaded in its replay). `record.rs` (stamps, `sync@v`, `path`), `window.rs`
@@ -98,6 +115,10 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
   countdown: it never ended; later at the first frame: the countdown waited for the clock to
   catch up with start times taken before); pacing at 0x47241c (it also runs many times a frame
   while loading); 0x4745b4 as the race's setup (not on the normal way to a race).
+- The race's drawing was found through the renderer's function table: Glide's at 0x505eb0
+  (found by searching the data for the address of the function that calls grBufferSwap),
+  `[[0x77d95c] + 0x298]` points at it, +0x28 is the swap; its only caller in the race frame is
+  0x4775d8, the frame's last call. Static call graphs miss such calls through tables.
 
 ## Learned
 

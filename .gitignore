@@ -10,3 +10,4 @@ shot*/
 # recordings and their savestates (game memory: never commit)
 rec*.txt
 *.state
+/target-map

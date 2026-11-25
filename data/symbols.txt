@@ -12,3 +12,13 @@
 0x433624 DD_EnumModesCallback  EnumDisplayModes callback (menu wants 640x480 or 640x400 at 8 bits)
 0x4d37b4 font_depth  0: 8-bit pixels, 1: 16-bit
 0x513ed8 spr_base  the 2D picture: first byte; 0x513edc bytes a row; 0x513ee0 rows; 0x513f00 its end
+0x474a10 Race_Frame  one logic frame of a race: clock, logic, camera, then Race_Draw (hooked: frames.rs)
+0x4775d8 Race_Draw  buffer swap, then the track, the cars and the HUD through the renderer's table (hooked: pictures between frames)
+0x4bab5c Clock_Advance  the game's clock [0x7e9f9c] on by the time since the last call times a speed (hooked: fixed rate)
+0x49dad0 Car_Matrix  matrix (eax) from a car object (edx): rotation 3x3 floats at +4, place at +0x28
+0x419840 Camera_Set  camera (eax: rotation at +0x10, place at +0x40) from a matrix (edx)
+0x419750 Camera_View  the view 0x73a118 from the camera 0x739f80
+0x739f80 camera  rotation at +0x10, place at +0x40
+0x7499a9 player_car  the car object of player i at [0x7499a9 + i * 0x2c00] (8 players)
+0x747e28 player_viewed  the player the camera follows
+0x77d95c renderer  [+0x298]: its function table (Glide's at 0x505eb0: +0x28 the buffer swap)
