@@ -1,5 +1,17 @@
 # PLAN — Motorhead
 
+## Now (2026-11-25, end of session)
+
+- Last commit 388335a (main, 2 commits not pushed: 7e766ed Glide palettes, 388335a frames).
+- Waiting for the user's new recording `rec3.txt` (+ `rec3.txt.1.state`) made with
+  `$env:MOTORHEAD_RECORD="rec3.txt"; .	argetelease\motorhead.exe`. Then: replay it
+  (`MOTORHEAD_INPUT=@rec3.txt`, with the user's settings, screenshots only) and go on with the
+  graphics (pictures between logic frames, GUIDE 8b step 3; then speed, widescreen).
+- Ask before every game start (each opens a window on the user's screen; runs are slow).
+- Open: crash seen twice in 10 runs (0x46fc88 path object; diagnostic hook logs it); the
+  menu part of a replay runs in real time (an early Enter may miss the intro skip); kit
+  changes below not yet in recomp_kit (Glide palettes, input clock, savestate files).
+
 The way through: recomp_kit's docs/GUIDE.md. Tick off what is done, note what was learned.
 Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 
