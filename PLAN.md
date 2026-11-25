@@ -35,7 +35,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 - [ ] gamepad
 - [ ] release (tag `v*`)
 
-## Kit (changes here that recomp_kit should get; ask the user before)
+## Kit (taken over into recomp_kit 358ec43, 2026-11-25)
 
 - `tools/new-game.ps1` does not copy `crates/indeo` (the workspace lists it): copied by hand.
 - `image.rs`: Watcom's virtual sizes 0 (the raw size is the size) and .bss with a raw size
