@@ -85,6 +85,10 @@ impl Game for MyGame {
         hooks::all()
     }
 
+    fn glide(&self) -> Option<&'static dyn win32::GlideExt> {
+        Some(&frames::FRAMES)
+    }
+
     fn on_start(&self) {
         recomp::image::set_symbols(include_str!("../data/symbols.txt"));
     }

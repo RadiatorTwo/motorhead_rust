@@ -12,15 +12,18 @@
 //! clock must not be set back at a race's start: the race keeps start times from it, and its
 //! countdown then waited until the clock had caught up.)
 //!
-//! The pictures are the loop's own for now: at most the logic rate. Pictures between logic
-//! frames come later (GUIDE 8b, step 3).
+//! Pictures come at the display's refresh rate (GUIDE 8b, step 4): while the next logic frame is
+//! not yet due, the race's drawing (`RACE_DRAW`, the last call of the frame) runs again as a
+//! picture, with the game's static data put back after it (`STATICS`). For now each picture
+//! shows the newest logic frame; interpolation between the last two comes next (step 3).
 
 use recomp::rt::{Cpu, ESP, call_original};
 use recomp::ver::Us;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use win32::platform::tween::{LogicClock, Pacer};
-use win32::platform::{input_clock, mem};
+use win32::GlideExt;
+use win32::platform::tween::{self, LogicClock, Pacer, Statics};
+use win32::platform::{guest_call, hold_turn, input_clock, mem, without_turn};
 
 /// The race's frame: the clock advanced, the time step taken, the cars moved, drawn. (Not
 /// 0x47241c before it: that one also runs many times a frame while the race loads.)
@@ -31,8 +34,32 @@ pub const CLOCK_ADVANCE: Us = Us(0x4bab5c);
 /// The game's clock: seconds (double).
 const CLOCK: Us = Us(0x7e9f9c);
 
+/// The race's drawing: the buffer swap (the last picture shown), then the track, the cars and
+/// the HUD drawn through the renderer's table (`[[0x77d95c] + 0x298]`; Glide's at 0x505eb0,
+/// swap at +0x28). No arguments; the camera is set before it (0x4775ad..0x4775be).
+const RACE_DRAW: Us = Us(0x4775d8);
+
 /// The logic rate: frames a second.
 const RATE: u32 = 60;
+
+/// Pictures a second when the display's refresh rate is unknown.
+const DEFAULT_FPS: f64 = 60.0;
+/// The most pictures a second: a faster display gets a picture every second (third...)
+/// refresh.
+const MAX_FPS: f64 = 240.0;
+
+/// The game's static data (DGROUP and .bss: no memory between them), put back after each
+/// picture.
+static STATICS: [Statics; 2] = [
+    Statics {
+        range: (0x4d0000, 0x507c00),
+        left: &[],
+    },
+    Statics {
+        range: (0x510000, 0x80ce00),
+        left: &[],
+    },
+];
 
 static LOGIC: LogicClock = LogicClock::new(RATE);
 static PACER: LazyLock<Pacer> = LazyLock::new(Pacer::default);
@@ -65,8 +92,7 @@ pub fn race_frame(c: &mut Cpu) {
         // a recording's start: the whole game saved, or loaded in a replay
         input_clock::start(c);
     }
-    // no pictures between frames yet: the wait until the frame is due
-    LOGIC.frame(|| {}, &PACER, Duration::from_nanos(1));
+    LOGIC.frame(|| picture(c), &PACER, pace().period);
     *LAST.lock().unwrap() = Some(Instant::now());
     input_clock::logic_frame(LOGIC.frame_time());
     FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -77,6 +103,57 @@ pub fn race_frame(c: &mut Cpu) {
         }
     }
     call_original(c, RACE_FRAME.at());
+}
+
+/// A picture between logic frames: the race's drawing again, everything it changed in the
+/// game's static data put back (no other guest thread runs meanwhile).
+fn picture(c: &mut Cpu) {
+    let regs = tween::save(c);
+    let saved = STATICS.each_ref().map(Statics::save);
+    hold_turn(true);
+    guest_call(c, RACE_DRAW.at(), &[]);
+    hold_turn(false);
+    for (s, v) in STATICS.iter().zip(saved) {
+        s.restore(v);
+    }
+    tween::restore(c, &regs);
+}
+
+/// The pictures' pace: a picture each refresh of the display (each second, third... above
+/// `MAX_FPS`), kept to its refreshes, else `DEFAULT_FPS`.
+struct Pace {
+    period: Duration,
+    refresh: Option<(Instant, Duration)>,
+}
+
+fn pace() -> Pace {
+    let refresh = win32::platform::window::vblank();
+    let hz = match refresh {
+        Some((_, p)) => Some(1.0 / p.as_secs_f64()),
+        None => win32::platform::window::refresh_hz(),
+    };
+    let period = match hz {
+        // (480.001 Hz is two refreshes a picture at 240, not three)
+        Some(hz) => (hz / MAX_FPS - 0.01).ceil().max(1.0) / hz,
+        None => 1.0 / DEFAULT_FPS,
+    };
+    Pace {
+        period: Duration::from_secs_f64(period),
+        refresh,
+    }
+}
+
+/// Glide's buffer swap: the pictures' pace.
+pub struct Frames;
+
+pub static FRAMES: Frames = Frames;
+
+impl GlideExt for Frames {
+    fn before_shown(&self) {
+        let p = pace();
+        win32::platform::gl::set_vsync(true);
+        without_turn(|| PACER.pace_on(p.period, p.refresh));
+    }
 }
 
 /// `MOTORHEAD_STATE_DUMP=file` (scripted tests): the game's data and heap at race frames 1 and

@@ -351,7 +351,7 @@ pub fn mix_rotation(a: &[i16; 9], b: &[i16; 9], one: f64, alpha: u32) -> Option<
 /// system: page faults and system calls), brought up to date at `save` by the pages written
 /// since the last picture, and `restore` writes back only the pages the picture wrote (guest
 /// memory has a write watch, `Memory::written`; copying all of it there and back was ~3% of
-/// Nuclear Strike's game thread). One `Statics` per game: the watch over its range is reset at
+/// Nuclear Strike's game thread). `Statics` must not overlap: the watch over a range is reset at
 /// each call.
 pub struct Statics {
     pub range: (u32, u32),
@@ -359,7 +359,10 @@ pub struct Statics {
 }
 
 thread_local! {
-    static KEPT: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The buffer of each `Statics`, by the start of its range (a game whose image has a gap
+    /// keeps a `Statics` per part: Motorhead's DGROUP and .bss).
+    static KEPT: std::cell::RefCell<std::collections::HashMap<u32, Vec<u8>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 impl Statics {
@@ -367,7 +370,7 @@ impl Statics {
     pub fn save(&self) -> Vec<u8> {
         let (lo, hi) = self.range;
         let m = mem();
-        let mut kept = KEPT.take();
+        let mut kept = KEPT.with_borrow_mut(|k| k.remove(&lo)).unwrap_or_default();
         let len = (hi - lo) as usize;
         match m.written(lo, hi) {
             Some(pages) if kept.len() == len => {
@@ -406,7 +409,7 @@ impl Statics {
             }
             None => m.slice(lo, saved.len()).copy_from_slice(&saved),
         }
-        KEPT.set(saved);
+        KEPT.with_borrow_mut(|k| k.insert(lo, saved));
     }
 }
 
