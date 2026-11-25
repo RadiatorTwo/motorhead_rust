@@ -22,6 +22,7 @@ pub mod gdi32;
 pub mod gl;
 pub mod glide;
 pub mod hd;
+pub mod input_clock;
 pub mod kernel32;
 pub mod menu;
 pub mod menupad;
@@ -285,6 +286,11 @@ impl MemoryCopy {
             })
     }
 
+    /// The heap's used blocks (address, size) in the copy.
+    pub fn heap_blocks(&self) -> Vec<(u32, u32)> {
+        self.heap.used.iter().map(|(&a, &s)| (a, s)).collect()
+    }
+
     pub fn bytes(&self) -> usize {
         self.parts.iter().map(|p| p.1.len()).sum()
     }
@@ -332,7 +338,8 @@ impl MemoryCopy {
         let mut parts = Vec::new();
         for _ in 0..n {
             let (lo, len) = (u(r)?, u(r)?);
-            if lo as u64 + len as u64 > ARENA_HI as u64 {
+            // the fixed ranges hold the game's DLLs too, above the arena (Smacker at 0x5f400000)
+            if lo as u64 + len as u64 > 1 << 32 {
                 return Err(std::io::Error::other("a part outside guest memory"));
             }
             let mut b = vec![0; len as usize];

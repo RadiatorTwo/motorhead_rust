@@ -41,6 +41,8 @@ pub enum Input {
     Cheat(usize),
     /// scripted only: a control of the scripted pad (`dinput::CONTROLS`) and its value
     Pad(usize, f32),
+    /// scripted only: the game's next start (`input_clock::sync`); later items wait for it
+    Sync,
 }
 
 struct App {
@@ -219,8 +221,23 @@ fn scripted(input: &mut VecDeque<Input>) {
     static SCRIPT: Mutex<Option<VecDeque<(u64, Input)>>> = Mutex::new(None);
     let mut s = SCRIPT.lock().unwrap();
     let script = s.get_or_insert_with(|| parse_script(script_text()));
-    let now = super::kernel32::start_time().elapsed().as_millis() as u64;
-    while script.front().is_some_and(|e| e.0 <= now) {
+    // the items after a start (`sync`) wait for the game to reach it
+    static PASSED: Mutex<usize> = Mutex::new(0);
+    loop {
+        let now = super::input_clock::ms();
+        match script.front() {
+            Some((_, Input::Sync)) => {
+                let mut p = PASSED.lock().unwrap();
+                if super::input_clock::syncs() <= *p {
+                    break;
+                }
+                *p += 1;
+                script.pop_front();
+                continue;
+            }
+            Some(e) if e.0 <= now => {}
+            _ => break,
+        }
         match script.pop_front().unwrap().1 {
             Input::Poke(a, v) => super::mem().wr32(a, v),
             Input::Cheat(k) => super::cheats::request(k),
@@ -237,7 +254,35 @@ fn scripted(input: &mut VecDeque<Input>) {
     }
 }
 
+/// The script's `n`-th `sync` item (0 the first), if it has one: its time and its value
+/// (`sync@hex`, the game's state there; 0 without).
+pub fn script_sync(n: usize) -> Option<(u64, u32)> {
+    static SYNCS: std::sync::OnceLock<Vec<(u64, u32)>> = std::sync::OnceLock::new();
+    SYNCS
+        .get_or_init(|| {
+            script_text()
+                .split_whitespace()
+                .filter_map(|item| {
+                    let (t, what) = item.split_once(':')?;
+                    let v = match what.strip_prefix("sync") {
+                        Some("") => 0,
+                        Some(h) => u32::from_str_radix(h.strip_prefix('@')?, 16).ok()?,
+                        None => return None,
+                    };
+                    Some((t.parse().ok()?, v))
+                })
+                .collect()
+        })
+        .get(n)
+        .copied()
+}
+
 /// The scripted input's items (<PREFIX>_INPUT, or the file it names with `@`), comments removed.
+/// The file `<PREFIX>_INPUT=@file` names, if it names one.
+pub fn script_file() -> Option<String> {
+    recomp::config::env("INPUT")?.strip_prefix('@').map(str::to_string)
+}
+
 pub fn script_text() -> &'static str {
     static TEXT: OnceLock<String> = OnceLock::new();
     TEXT.get_or_init(|| {
@@ -326,6 +371,8 @@ fn parse_script(text: &str) -> VecDeque<(u64, Input)> {
             ev.push((t + 30 + hold, Input::Button(b, false)));
         } else if what == "close" {
             ev.push((t, Input::Close));
+        } else if what == "sync" || what.starts_with("sync@") {
+            ev.push((t, Input::Sync));
         } else if what == "blur" || what == "focus" {
             ev.push((t, Input::Focus(what == "focus")));
         } else if let Some(k) = super::cheats::find(what) {

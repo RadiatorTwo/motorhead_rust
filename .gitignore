@@ -7,3 +7,6 @@ target/
 compiled.bin
 shot*/
 *.log
+# recordings and their savestates (game memory: never commit)
+rec*.txt
+*.state

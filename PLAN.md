@@ -22,7 +22,12 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 
 - [x] the attract demo races in Glide (512x384) with textures (2026-11-25: P_8 textures and
   grTexDownloadTable were missing in glide.rs)
-- [ ] a race of the player's own (needs a recording, `MOTORHEAD_RECORD`)
+- [x] fixed logic rate (60 Hz, `src/frames.rs`: the clock 0x4bab5c a frame a call, the loop
+  0x474a10 paced) and recordings that play the same: input in logic frames
+  (`input_clock`), a savestate at the race's first frame next to the recording
+  (`recN.txt.1.state`). Checked 2026-11-25: two replays the same for 3540 frames.
+- [ ] a race of the player's own recorded with this (rec1/rec2 are from before: no savestate)
+- [ ] pictures between logic frames (GUIDE 8b step 3; for now at most 60 fps)
 - [ ] crash seen once in the demo, not again in ~6 runs: read at 0x2e4 in 0x46fc88 (a
   track/spline object with [+4] = 0; 0x4710xx frees such an object and zeroes [+4]).
   Watch for it.
@@ -65,6 +70,22 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 
 - `glide.rs`: palette textures (P_8, AP_88) through grTexDownloadTable(/Partial), converted
   again when drawn after the palette changed; grGlideGetVersion, grBufferNumPending.
+- `input_clock.rs` (new): the time INPUT and RECORD count in (logic frames in a game's loop,
+  input let through at frames' starts), `sync` points, `start` (savestate saved with a
+  recording, loaded in its replay). `record.rs` (stamps, `sync@v`, `path`), `window.rs`
+  (`Input::Sync`, `script_sync`, `script_file`), `user32.rs` (`poll_now`, gated input).
+- `savestate.rs`: `save_to` / `load_from` a file; the heap fingerprint by the blocks' places
+  only. `mod.rs` `MemoryCopy::read`: DLLs above the arena are guest memory (was refused).
+
+## Learned (frames)
+
+- The race's time step comes from QueryPerformanceCounter: replays drifted. Fixing the clock
+  was not enough: the starting grid comes from `rand`, whose state the menus change, and the
+  heap's order differs. A savestate at the race's first frame made replays exact.
+- Dead ends: setting the clock to 0 at a race's start (0x474210 runs every frame of the
+  countdown: it never ended; later at the first frame: the countdown waited for the clock to
+  catch up with start times taken before); pacing at 0x47241c (it also runs many times a frame
+  while loading); 0x4745b4 as the race's setup (not on the normal way to a race).
 
 ## Learned
 

@@ -180,7 +180,7 @@ pub fn on() -> bool {
 }
 
 fn now() -> u64 {
-    super::kernel32::start_time().elapsed().as_millis() as u64
+    super::input_clock::ms()
 }
 
 fn write(f: &mut File, lines: Vec<String>) {
@@ -196,11 +196,26 @@ pub fn input(i: &Input) {
     }
     let mut r = RECORD.lock().unwrap();
     let Some(f) = r.as_mut() else { return };
-    let lines = f.rec.event(i, now());
+    let lines = f.rec.event(i, super::input_clock::stamp());
     write(f, lines);
     if matches!(i, Input::Close) {
         let _ = f.file.flush();
     }
+}
+
+/// The recording's file, while recording.
+pub fn path() -> Option<String> {
+    RECORD.lock().unwrap().as_ref().map(|f| f.path.clone())
+}
+
+/// A start of the game (`input_clock::sync`) at `t` ms, with the game's state there.
+pub fn sync(t: u64, value: u32) {
+    if !on() {
+        return;
+    }
+    let mut r = RECORD.lock().unwrap();
+    let Some(f) = r.as_mut() else { return };
+    write(f, vec![format!("{t}:sync@{value:x}")]);
 }
 
 /// The first real pad's controls, at every read of the pads.

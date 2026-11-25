@@ -50,7 +50,9 @@ fn hash(words: impl Iterator<Item = u32>) -> u64 {
 
 fn fingerprint() -> [u64; 4] {
     [
-        hash(super::heap_blocks().into_iter().flat_map(|(a, s)| [a, s])),
+        // the blocks' places: the copy brings back their sizes with the heap's bookkeeping
+        // (Motorhead's sounds took the same 64 KB blocks in another order from run to run)
+        hash(super::heap_blocks().into_iter().map(|(a, _)| a)),
         hash(
             kernel32::object_kinds()
                 .into_iter()
@@ -127,18 +129,27 @@ fn read_cpu(r: &mut impl Read) -> std::io::Result<Cpu> {
 }
 
 pub fn save(c: &mut Cpu) {
+    save_to(c, &path());
+}
+
+pub fn load(c: &mut Cpu) {
+    load_from(c, &path());
+}
+
+/// Save to `file` (a recording's start: `record.rs`). Whether it was written.
+pub fn save_to(c: &mut Cpu, file: &std::path::Path) -> bool {
     if let Err(why) = crate::game::game().savestate_ok() {
         log!("savestate: {why}");
-        return;
+        return false;
     }
     let Some(start) = *START.lock().unwrap() else {
         log!("savestate: the mission's start was not seen");
-        return;
+        return false;
     };
     let t = std::time::Instant::now();
     let memory = MemoryCopy::take();
     let write = || -> std::io::Result<()> {
-        let tmp = path().with_extension("tmp");
+        let tmp = file.with_extension("tmp");
         let mut w = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
         w.write_all(MAGIC)?;
         let m = mission();
@@ -157,23 +168,30 @@ pub fn save(c: &mut Cpu) {
         }
         memory.write(&mut w)?;
         w.into_inner().map_err(|e| e.into_error())?.sync_all()?;
-        std::fs::rename(&tmp, path())
+        std::fs::rename(&tmp, file)
     };
     match write() {
-        Ok(()) => log!(
-            "savestate: saved {} MB to {} in {} ms",
-            memory.bytes() >> 20,
-            path().display(),
-            t.elapsed().as_millis()
-        ),
-        Err(e) => log!("savestate: cannot write {}: {e}", path().display()),
+        Ok(()) => {
+            log!(
+                "savestate: saved {} MB to {} in {} ms",
+                memory.bytes() >> 20,
+                file.display(),
+                t.elapsed().as_millis()
+            );
+            true
+        }
+        Err(e) => {
+            log!("savestate: cannot write {}: {e}", file.display());
+            false
+        }
     }
 }
 
-pub fn load(c: &mut Cpu) {
+/// Load from `file` (a replay's start). Whether it was loaded.
+pub fn load_from(c: &mut Cpu, file: &std::path::Path) -> bool {
     let t = std::time::Instant::now();
     let mut read = || -> std::io::Result<Result<(), String>> {
-        let mut r = std::io::BufReader::new(std::fs::File::open(path())?);
+        let mut r = std::io::BufReader::new(std::fs::File::open(file)?);
         let mut magic = [0; 8];
         r.read_exact(&mut magic)?;
         if &magic != MAGIC {
@@ -198,12 +216,6 @@ pub fn load(c: &mut Cpu) {
             .filter(|&k| start[k] != now[k])
             .map(|k| PARTS[k])
             .collect();
-        if !differ.is_empty() {
-            return Ok(Err(format!(
-                "this mission started otherwise ({}): start it as when saved",
-                differ.join(", ")
-            )));
-        }
         let clock = r64(&mut r)?;
         let cpu = read_cpu(&mut r)?;
         let mut states = Vec::new();
@@ -211,6 +223,23 @@ pub fn load(c: &mut Cpu) {
             states.push((r32(&mut r)?, r64(&mut r)?));
         }
         let memory = MemoryCopy::read(&mut r)?;
+        if !differ.is_empty() {
+            if differ.contains(&PARTS[0]) {
+                let (saved, now) = (memory.heap_blocks(), super::heap_blocks());
+                let k = saved.iter().zip(&now).take_while(|(a, b)| a == b).count();
+                log!(
+                    "savestate: heap blocks saved {}, now {}; the same up to {k}: saved {:x?}, now {:x?}",
+                    saved.len(),
+                    now.len(),
+                    saved.get(k..k + 4),
+                    now.get(k..k + 4)
+                );
+            }
+            return Ok(Err(format!(
+                "this mission started otherwise ({}): start it as when saved",
+                differ.join(", ")
+            )));
+        }
         let sp = c.r[ESP];
         if cpu.r[ESP] != sp || mem().rd32(sp) != memory.rd32(sp) {
             return Ok(Err("made elsewhere in the game".into()));
@@ -225,8 +254,17 @@ pub fn load(c: &mut Cpu) {
         Ok(Ok(()))
     };
     match read() {
-        Ok(Ok(())) => log!("savestate: loaded in {} ms", t.elapsed().as_millis()),
-        Ok(Err(why)) => log!("savestate: not loaded: {why}"),
-        Err(e) => log!("savestate: cannot read {}: {e}", path().display()),
+        Ok(Ok(())) => {
+            log!("savestate: loaded {} in {} ms", file.display(), t.elapsed().as_millis());
+            true
+        }
+        Ok(Err(why)) => {
+            log!("savestate: {} not loaded: {why}", file.display());
+            false
+        }
+        Err(e) => {
+            log!("savestate: cannot read {}: {e}", file.display());
+            false
+        }
     }
 }

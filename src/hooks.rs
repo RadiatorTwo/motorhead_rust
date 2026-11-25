@@ -17,6 +17,9 @@ use recomp::ver::Us;
 pub fn all() -> Vec<(u32, Hook)> {
     let table: &[(Us, Hook)] = &[
         (POW10_TABLE, pow10_table),
+        (PATH_NEAREST, path_nearest),
+        (crate::frames::RACE_FRAME, crate::frames::race_frame),
+        (crate::frames::CLOCK_ADVANCE, crate::frames::clock_advance),
         (crate::font::FONT_DRAW, crate::font::draw),
         (crate::sprites::DRAW_CLIPPED, crate::sprites::draw_clipped),
         (crate::sprites::DRAW_STEP, crate::sprites::draw_step),
@@ -33,6 +36,35 @@ const POW10_TABLE: Us = Us(0x4cde6f);
 fn pow10_table(c: &mut Cpu) {
     c.r[recomp::rt::EDI] = POW10_TABLE.at() + 5;
     c.r[recomp::rt::ESP] += 4;
+}
+
+/// The node of a path (a track's line) nearest a point: eax the path ([+4] its nodes, [+0x18]
+/// their number), edx the point, ebx where the last found node is kept. Crashed twice in
+/// races with a path whose nodes were 0 or garbage: logged here (diagnosis).
+const PATH_NEAREST: Us = Us(0x46fc88);
+
+fn path_nearest(c: &mut Cpu) {
+    use recomp::rt::{EAX, EBX};
+    let m = win32::platform::mem();
+    let p = c.r[EAX];
+    let (nodes, count) = (m.rd32(p + 4), m.rd32(p + 0x18));
+    if nodes == 0 || count == 0 || count > 100_000 {
+        eprintln!(
+            "path_nearest: path {p:#x} nodes {nodes:#x} count {count} stride {} last {:#x}              from {:#x}",
+            m.rd32(p + 0x1c),
+            if c.r[EBX] != 0 { m.rd32(c.r[EBX]) } else { 0 },
+            m.rd32(c.r[recomp::rt::ESP]),
+        );
+    }
+    if crate::frames::race_log() {
+        let f = crate::frames::FRAME.load(std::sync::atomic::Ordering::Relaxed);
+        if f % crate::frames::race_log_every() == 0 {
+            let pt = c.r[recomp::rt::EDX];
+            let v = |k: u32| f32::from_bits(m.rd32(pt + 4 * k));
+            eprintln!("race {f}: path {p:#x} at {:.3} {:.3} {:.3}", v(0), v(1), v(2));
+        }
+    }
+    call_original(c, PATH_NEAREST.at());
 }
 
 // Example: the game's frame wait, where debug commands and savestates can run.

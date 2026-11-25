@@ -150,6 +150,11 @@ static LAST_POLL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::n
 /// briefing). Fetching it at every read would hand a new key event to whichever read came
 /// first: Recoil reads its keyboard in two places in turn, and only one of them (0x46fa90,
 /// right after its PeekMessage) skips a video; it then missed about every second key press.
+/// At a logic frame's start (`input_clock::logic_frame`): the input due reaches the game.
+pub fn poll_now() {
+    poll(Duration::ZERO);
+}
+
 pub fn poll_input() {
     let now = super::kernel32::ms_since_start();
     if now.wrapping_sub(LAST_POLL.load(std::sync::atomic::Ordering::Relaxed)) >= 20 {
@@ -169,7 +174,11 @@ fn poll(wait: Duration) {
     let mut guard = st();
     let s = &mut *guard;
     let hwnd = s.main;
-    while let Some(i) = window::next_input() {
+    // in a logic loop the input waits for the next frame's start (`input_clock`)
+    while let Some(i) = (!super::input_clock::gated())
+        .then(window::next_input)
+        .flatten()
+    {
         let m = |msg, wp, lp| Msg { hwnd, msg, wp, lp };
         match i {
             Input::Key {
@@ -249,7 +258,11 @@ fn poll(wait: Duration) {
                     }
                 }
             }
-            Input::Focus(true) | Input::Poke(..) | Input::Cheat(_) | Input::Pad(..) => {}
+            Input::Focus(true)
+            | Input::Poke(..)
+            | Input::Cheat(_)
+            | Input::Pad(..)
+            | Input::Sync => {}
         }
     }
     let now = super::kernel32::ms_since_start();
