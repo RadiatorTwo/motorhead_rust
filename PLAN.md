@@ -61,7 +61,9 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   it ([0x4da8e8] = 0) 0x43ac19 and two more add rand()*80 to the track's path pointer
   [0x79eebc]. The value is seeded now (`registry_seed`, 2026-11-26). To check: a race played
   to the finish (rec4's replay cannot: recorded with the protection failed).
-- [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound (waveOut: none)
+- [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound: waveOut plays
+  into the mixer's stream (`waveout.rs`, 2026-11-26: Smacker opens 44100 Hz stereo 16 bit,
+  CALLBACK_NULL, writes 11264 frames at a time and polls WHDR_DONE). To hear: the intro.
 - [ ] saving and loading (league, records)
 - [ ] the whole game played through
 
@@ -120,6 +122,9 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   reading the whole window-sized target was ~30% of a race.
 
 ## Kit (not yet taken over)
+
+- `waveout.rs` (new, WINMM): one waveOut device into `dsound::stream_*` (was: no device);
+  headers done when the mixer has played them (a host thread), callbacks none/event/function.
 
 - `glide.rs`/`options.rs`: `texture_lod` (REG_DWORD `TextureLod`, 0...3): the mipmap level
   0.5 levels larger per step (gradients scaled in `sample_mip`), row "Distance sharpness",
