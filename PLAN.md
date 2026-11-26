@@ -93,13 +93,13 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [x] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate): the user checked it with widescreen
   (2026-11-26)
-- [ ] gamepad (2026-11-26, `pad.rs`): the game asks for each race task through 0x43bd60
+- [x] gamepad (2026-11-26, `pad.rs`): the game asks for each race task through 0x43bd60
   (Control_Value, codes in 0x73ad18): hooked, the pad answers besides the chosen layout:
   stick/D-pad steer and RT/LT gas/brake analog (strength 0..1, as the game's joystick axes),
   RB/LB gears, A handbrake, B horn, Y rear view, X camera. In the menus A confirms, B is the
   second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
   `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
-  gives 40 mph where full gives 117. The user: menu with A works; analog to try.
+  gives 40 mph where full gives 117. The user: menu with A works, analog fine; steering squared (linear was twitchy).
 - [ ] release (tag `v*`)
 
 ## Kit (taken over into recomp_kit 358ec43, 2026-11-25)
@@ -147,6 +147,8 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - `glide.rs` `View::Tall(s)`: the whole width, s times the frame's height around its middle,
   scissor cut to the frame (widescreen through a focal length shared by x and y). Taken over
   into recomp_kit 45d2512 with GUIDE 8c (2026-11-26).
+- `dinput.rs` `Pad::triggers` (analog, recorded), `game.rs` `Game::pad_buttons`. Taken over into
+  recomp_kit 8beefe0 + ce30ecf (GUIDE 8f, 2026-11-26).
 
 - `glide.rs`/`options.rs`: `texture_lod` (REG_DWORD `TextureLod`, 0...3): the mipmap level
   0.5 levels larger per step (gradients scaled in `sample_mip`), row "Distance sharpness",
