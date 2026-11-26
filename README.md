@@ -54,11 +54,30 @@ them installed already.
   HUD stays in the middle.
 - **Smooth:** The game shows as many pictures as your monitor can display (up to 240 per
   second). The race itself still runs at the same speed as on the original.
+- **Gamepad like a modern racing game:** Analog steering and analog gas and brake on the
+  triggers, whatever control layout is chosen in the game. See below.
 - **Settings menu (F10):** All new options in one place, see below.
 - **Fixed glitches:** The light halos and lens flares no longer flicker, and the game no longer
   crashes at the finish line.
 - **No CD drive needed:** Videos and music come from your CD image.
 - **Frame rate display:** F12 shows it.
+
+## Gamepad
+
+Plug in an Xbox-style gamepad (before or after the start). It works in every control layout
+of the game, next to the keyboard.
+
+| Button | In a race | In the menus |
+|---|---|---|
+| Left stick | Steer (gently near the middle, full at the edge) | Move |
+| D-pad left/right | Steer (full) | Move |
+| RT / LT | Gas / brake, as far as you pull them | |
+| RB / LB | Gear up / down (manual gearbox) | |
+| A | Handbrake | Confirm |
+| B | Horn | Back |
+| Y | Rear view | |
+| X | Change the camera | |
+| Start | Game menu | |
 
 ## The settings menu (F10)
 
@@ -81,15 +100,16 @@ Tab) switch between the pages. Escape or F10 closes the menu. The mouse works to
 
 **Advanced**
 
-Improvements that go beyond the look of the original. They are off by default.
+Improvements that go beyond the look of the original.
 
 | Setting | What it does |
 |---|---|
-| Distance sharpness | Keeps the road and walls sharp further ahead of the car: Original, Sharper, Much sharper or Sharpest. The sharper settings shimmer a little in the distance. Works with trilinear and anisotropic filtering. |
+| Soft lights | Light halos and lens flares no longer add up to a white blot where many of them overlap (as at the start on RedRock). On by default. |
+| Distance sharpness | Keeps the road and walls sharp further ahead of the car: Original, Sharper, Much sharper or Sharpest. The sharper settings shimmer a little in the distance. Works with trilinear and anisotropic filtering. Original by default. |
 
 ## What does not work yet
 
-Gamepads and network play are still missing. The Linux version is built automatically but
+Network play is still missing. The Linux version is built automatically but
 nobody has played it yet. The game has also not been played all the way through, so please
 tell us if you find a problem.
 
