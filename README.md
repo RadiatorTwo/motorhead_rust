@@ -1,11 +1,12 @@
 # motorhead_rust
 
-A native port of **Motorhead** (1998, Digital Illusions CE / Gremlin) in Rust. The game's own
-program is recompiled: the player's `motor.exe` (Watcom C) is decoded with [iced-x86], every
-function is lifted to [Cranelift] IR and compiled to native code when the game starts, and the
-Windows/DirectX functions it calls are implemented in Rust (the game's 3dfx Glide renderer on
-OpenGL, DirectDraw for the menus, DirectSound, the CD's music). No game code or data is part
-of this repository or its releases: you need your own copy of the game.
+This is **Motorhead**, the racing game from 1998 by Digital Illusions CE and Gremlin, running
+as a native program on today's Windows and Linux.
+
+It works like this. When you start it for the first time, it takes the `motor.exe` from your
+own copy of the game and translates it into machine code for your computer. Everything the old
+game expected from Windows 98 and its 3dfx graphics card is rebuilt in Rust. The game itself
+is not part of this project. You need your own CD.
 
 ![A race on Goldbridge at 1440x1080](docs/screenshots/race.png)
 
@@ -16,62 +17,66 @@ of this repository or its releases: you need your own copy of the game.
     <td width="33%"><img src="docs/screenshots/menu.png" alt="The main menu"></td>
   </tr>
   <tr>
-    <td align="center"><em>The start at night: headlights and halos</em></td>
+    <td align="center"><em>The start at night</em></td>
     <td align="center"><em>Under the bridge</em></td>
     <td align="center"><em>The main menu</em></td>
   </tr>
 </table>
 
-Built with [recomp_kit].
+## How to play
 
-## Playing
+1. Download the latest version from the [releases] page and unpack it. There is a zip file for
+   Windows and a tar.gz file for Linux.
+2. Make an image of your Motorhead CD (a .bin file with its .cue file) and put both files next
+   to `motorhead.exe`, or into the `game_files` folder.
+3. Start `motorhead.exe`. On Linux, run `./motorhead` in its folder.
 
-1. Download from the [releases]: `motorhead-...-windows-x64.zip` for Windows or
-   `motorhead-...-linux-x64.tar.gz` for Linux (x86-64, OpenGL 3.3), and unpack it.
-2. Put an image of your CD (`.bin` with its `.cue`, or `.iso`) next to `motorhead.exe`
-   (Linux: `motorhead`) or into the `game_files` folder. Keep the image there: the music is
-   played from its audio tracks (a `.bin` with its `.cue`; an `.iso` has no music).
-3. Start `motorhead.exe` (Linux: `./motorhead` in its folder). It finds the game, checks the
-   version, and installs it from the CD's installer (`Motor/disk1/data1.cab`) into
-   `game_files/Motorhead`, the videos into `game_files/Movies`. Nothing in `game_files` is
-   ever deleted. The first start compiles the game (a few seconds; kept in
-   `game_files/Motorhead/compiled.bin`), later starts are quick.
+The first start takes a moment. The game is installed from your CD image into
+`game_files/Motorhead`, the videos go to `game_files/Movies`, and the game is translated once.
+After that it starts quickly.
 
-The European PC version is supported (`motor.exe` with SHA-256 `c27411fd...4d7a1c`); with any
-other, or without one, motorhead says so. Its messages go to `motorhead.log` next to it on
-Windows, to the terminal on Linux. The game keeps its own settings in
-`game_files/Motorhead/Game/MotorHead.CFG` (made at the first start), the port's in
-`registry.txt` beside it. On Linux the libraries for sound (ALSA, or PipeWire/PulseAudio
-through it) and gamepads (libudev) are needed; every desktop distribution has them.
+Please leave the CD image where it is. The music in the game comes from the audio tracks on
+the CD, so it is played from the image.
 
-What is new compared to the original:
-- The 3D picture drawn at the window's resolution, fullscreen (Alt+Enter), anti-aliasing and
-  texture filtering, in the port's own settings menu (F10)
-- Smooth frame rates: the race logic runs at its fixed 60 Hz as before, and pictures between
-  its frames show cars and camera in between (up to 240 frames a second); F12 shows the rate
-- Light halos and lens flares hidden only where something really covers them
-- The game's intro and race videos (Smacker) and the CD's music without a CD drive
+It works with the European PC version of the game. If you have a different version, the program
+tells you so. If something goes wrong, look into `motorhead.log` next to the program.
 
-Not there yet: widescreen, gamepads in the game, network play (the Mplayer version is not
-installed). Linux builds are made by the release workflow but have not been played on yet.
+On Linux you need the usual libraries for sound and gamepads. Every desktop distribution has
+them installed already.
 
-## Building
+## What is better than the original
+
+- The game is drawn at the full size of your window or screen, not at 640x480.
+- Alt+Enter switches to fullscreen.
+- Press F10 for the settings: resolution, anti-aliasing, texture filtering and more.
+- The game runs smoothly at the frame rate of your monitor (up to 240 frames per second).
+  The race itself still runs at the same speed as on the original. F12 shows the frame rate.
+- The light halos and lens flares no longer flicker.
+- Videos and music work without a CD drive.
+
+## What does not work yet
+
+Widescreen, gamepads and network play are still missing. The Linux version is built
+automatically but nobody has played it yet. The game has also not been played all the way
+through, so please tell us if you find a problem.
+
+## Building it yourself
 
 ```
 cargo build --release
 cargo run --release -- path/to/motor.exe
 ```
 
-Without a path it sets up and uses `game_files` (next to motorhead.exe, else in the current
-folder) as above. `cargo test --release` needs no game files. How it works and what is open:
-`CLAUDE.md` and `PLAN.md`.
+Without a path, the program looks for the game in `game_files`, just like the release does.
+`cargo test --release` runs the tests and needs no game files. Notes on how everything works
+are in `CLAUDE.md` and `PLAN.md`.
 
 ## License
 
-MIT (the code here). The game and its files belong to their owners and are not part of this
-project.
+The code in this project is under the MIT license. The game and its files belong to their
+owners and are not part of this project.
 
-[iced-x86]: https://github.com/icedland/iced
-[Cranelift]: https://cranelift.dev
+Built with [recomp_kit].
+
 [recomp_kit]: https://github.com/RadiatorTwo/recomp_kit
 [releases]: https://github.com/RadiatorTwo/motorhead_rust/releases
