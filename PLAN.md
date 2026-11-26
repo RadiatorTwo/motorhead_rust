@@ -125,6 +125,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 
 - `waveout.rs` (new, WINMM): one waveOut device into `dsound::stream_*` (was: no device);
   headers done when the mixer has played them (a host thread), callbacks none/event/function.
+  Taken over into recomp_kit 02e4dcb (2026-11-26).
 
 - `glide.rs`/`options.rs`: `texture_lod` (REG_DWORD `TextureLod`, 0...3): the mipmap level
   0.5 levels larger per step (gradients scaled in `sample_mip`), row "Distance sharpness",
