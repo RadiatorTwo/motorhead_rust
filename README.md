@@ -3,6 +3,8 @@
 This is **Motorhead**, the racing game from 1998 by Digital Illusions CE and Gremlin, running
 as a native program on today's Windows and Linux.
 
+> **Work in progress.** This port still has problems. I'm working on it.
+
 It works like this. When you start it for the first time, it takes the `motor.exe` from your
 own copy of the game and translates it into machine code for your computer. Everything the old
 game expected from Windows 98 and its 3dfx graphics card is rebuilt in Rust. The game itself
@@ -46,19 +48,40 @@ them installed already.
 
 ## What is better than the original
 
-- The game is drawn at the full size of your window or screen, not at 640x480.
-- Alt+Enter switches to fullscreen.
-- Press F10 for the settings: resolution, anti-aliasing, texture filtering and more.
-- The game runs smoothly at the frame rate of your monitor (up to 240 frames per second).
-  The race itself still runs at the same speed as on the original. F12 shows the frame rate.
-- The light halos and lens flares no longer flicker.
-- Videos and music work without a CD drive.
+- **Sharp picture:** The game is drawn at the full size of your window or screen, not at
+  640x480. Alt+Enter switches to fullscreen.
+- **Widescreen:** A race fills a wide screen and shows more of the track to the sides. The
+  HUD stays in the middle.
+- **Smooth:** The game shows as many pictures as your monitor can display (up to 240 per
+  second). The race itself still runs at the same speed as on the original.
+- **Settings menu (F10):** All new options in one place, see below.
+- **Fixed glitches:** The light halos and lens flares no longer flicker, and the game no longer
+  crashes at the finish line.
+- **No CD drive needed:** Videos and music come from your CD image.
+- **Frame rate display:** F12 shows it.
+
+## The settings menu (F10)
+
+Press **F10** at any time, in the menus or in a race. The game pauses while the menu is open.
+Every change works at once and is saved for the next start.
+
+How to use it: Up and Down choose a line, Left and Right change it. Escape or F10 closes the
+menu. The mouse works too.
+
+| Setting | What it does |
+|---|---|
+| Fullscreen | The game fills the whole screen without a border. Alt+Enter does the same. |
+| Resolution | The size of the window and of the picture. "Auto" uses the window's size. |
+| Anti-aliasing | Smooth edges instead of jagged ones. |
+| Textures | Sharper textures from a distance: Original, Trilinear or Anisotropic. |
+| Frame rate display | Shows how many pictures per second you get. F12 does the same. |
+| Widescreen | Races as wide as the window, the HUD in the middle. On by default. |
 
 ## What does not work yet
 
-Widescreen, gamepads and network play are still missing. The Linux version is built
-automatically but nobody has played it yet. The game has also not been played all the way
-through, so please tell us if you find a problem.
+Gamepads and network play are still missing. The Linux version is built automatically but
+nobody has played it yet. The game has also not been played all the way through, so please
+tell us if you find a problem.
 
 ## Building it yourself
 
