@@ -147,6 +147,21 @@ pub fn textures() -> Row {
     )
 }
 
+/// How sharp textures stay in the distance (a mipmap bias, `glide::texture_lod`).
+pub fn texture_lod() -> Row {
+    Row::choice(
+        "Distance sharpness",
+        "Textures sharp further away (trilinear and anisotropic only)",
+        || {
+            let names = ["Original", "Sharper", "Much sharper", "Sharpest"];
+            let c = glide::LOD_CHOICES;
+            let cur = c.iter().position(|&n| n == glide::texture_lod()).unwrap_or(0);
+            (c.iter().map(|&n| names[n as usize].to_string()).collect(), cur)
+        },
+        |k| glide::set_texture_lod(glide::LOD_CHOICES[k]),
+    )
+}
+
 pub fn frame_rate_display() -> Row {
     Row::on_off(
         "Frame rate display",

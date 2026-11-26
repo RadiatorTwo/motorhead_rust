@@ -65,8 +65,10 @@ them installed already.
 Press **F10** at any time, in the menus or in a race. The game pauses while the menu is open.
 Every change works at once and is saved for the next start.
 
-How to use it: Up and Down choose a line, Left and Right change it. Escape or F10 closes the
-menu. The mouse works too.
+How to use it: Up and Down choose a line, Left and Right change it. Page Up and Page Down (or
+Tab) switch between the pages. Escape or F10 closes the menu. The mouse works too.
+
+**Display**
 
 | Setting | What it does |
 |---|---|
@@ -76,6 +78,14 @@ menu. The mouse works too.
 | Textures | Sharper textures from a distance: Original, Trilinear or Anisotropic. |
 | Frame rate display | Shows how many pictures per second you get. F12 does the same. |
 | Widescreen | Races as wide as the window, the HUD in the middle. On by default. |
+
+**Advanced**
+
+Improvements that go beyond the look of the original. They are off by default.
+
+| Setting | What it does |
+|---|---|
+| Distance sharpness | Keeps the road and walls sharp further ahead of the car: Original, Sharper, Much sharper or Sharpest. The sharper settings shimmer a little in the distance. Works with trilinear and anisotropic filtering. |
 
 ## What does not work yet
 

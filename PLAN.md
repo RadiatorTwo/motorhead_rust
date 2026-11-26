@@ -121,6 +121,20 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 
 ## Kit (not yet taken over)
 
+- `glide.rs`/`options.rs`: `texture_lod` (REG_DWORD `TextureLod`, 0...3): the mipmap level
+  0.5 levels larger per step (gradients scaled in `sample_mip`), row "Distance sharpness",
+  on Motorhead's page Advanced. Tests at the start and at 116 mph: the bias works (+4 blurs
+  everything), -1 shows more grain on the road. Close to the car the blur is the original's
+  low-resolution textures, no bias helps there (2026-11-26).
+
+- `game.rs`/`glide.rs`: `GlideExt::constant_color(value, from)` (a game sees where a
+  constant colour is set), `glide::keep_picture` / `restore_picture` (the colour of the
+  picture drawn so far kept, and put back). Motorhead's motion blur draws the scene at alpha
+  0x80 over the last picture, meant for 60 a second: at 240 the trail faded four times as fast,
+  and with a time-based alpha the added halos summed up to six times their light (overexposed).
+  `src/blur.rs`: each picture starts from the last logic frame's, as in the original
+  (2026-11-26).
+
 - `advapi32.rs`/`game.rs`: a `registry_seed` name with a backslash is a value of another key
   (its full path). `record.rs` `crashed`: keys still held are written at a crash (rec4 lost
   its throttle).

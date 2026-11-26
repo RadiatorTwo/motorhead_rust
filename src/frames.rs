@@ -124,6 +124,11 @@ pub fn race_draw(c: &mut Cpu) {
     crate::pictures::draw(alpha, || {
         crate::wide::race_draw(c, |c| call_original(c, RACE_DRAW.at()))
     });
+    if PICTURE.load(Ordering::Relaxed) {
+        crate::blur::picture_drawn();
+    } else {
+        crate::blur::frame_drawn();
+    }
 }
 
 /// A picture between logic frames: the race's drawing again, everything it changed in the
@@ -186,6 +191,10 @@ pub static FRAMES: Frames = Frames;
 impl GlideExt for Frames {
     fn aspect(&self, window: Option<f32>) -> f32 {
         crate::wide::aspect(window)
+    }
+
+    fn constant_color(&self, value: u32, from: u32) -> u32 {
+        crate::blur::constant_color(value, from)
     }
 
     fn before_shown(&self) {

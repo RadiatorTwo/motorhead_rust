@@ -249,6 +249,12 @@ pub trait GlideExt: Sync {
     /// showing, a picture that took longer to draw came late: Recoil's moving tank lagged
     /// behind on every logic frame's picture and jumped ahead on the next).
     fn before_shown(&self) {}
+    /// grConstantColorValue(`value`) called from `from` (the return address): the value used.
+    /// A game whose effect depends on the picture rate changes it here (Motorhead's motion
+    /// blur: the constant alpha the scene is drawn over the last picture with).
+    fn constant_color(&self, value: u32, _from: u32) -> u32 {
+        value
+    }
 }
 
 static GAME: OnceLock<&'static dyn Game> = OnceLock::new();

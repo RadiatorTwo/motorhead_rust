@@ -13,6 +13,7 @@ mod hooks;
 mod loaded;
 mod sprites;
 mod wide;
+mod blur;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;
@@ -104,17 +105,24 @@ impl Game for MyGame {
 
     fn options(&self) -> Vec<options::Page> {
         // the port's settings menu (F10)
-        vec![options::Page {
-            title: "Display",
-            rows: vec![
-                options::fullscreen(),
-                options::window_size(),
-                options::anti_aliasing(),
-                options::textures(),
-                options::frame_rate_display(),
-                wide::option(),
-            ],
-        }]
+        vec![
+            options::Page {
+                title: "Display",
+                rows: vec![
+                    options::fullscreen(),
+                    options::window_size(),
+                    options::anti_aliasing(),
+                    options::textures(),
+                    options::frame_rate_display(),
+                    wide::option(),
+                ],
+            },
+            // optional improvements beyond the original's look
+            options::Page {
+                title: "Advanced",
+                rows: vec![options::texture_lod()],
+            },
+        ]
     }
 
     fn on_start(&self) {

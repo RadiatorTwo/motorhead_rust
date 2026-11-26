@@ -187,6 +187,26 @@ pub fn filtering() -> u32 {
     v.filter(|v| FILTER_CHOICES.contains(v)).unwrap_or(16)
 }
 
+/// Textures sharper in the distance: the mipmap level chosen 0.5 times this many levels
+/// larger (0 as the GPU chooses). A level larger is a texel per pixel more: sharper, and the
+/// distance shimmers a little more as the camera moves. With trilinear or anisotropic
+/// filtering only (the original filter has no mipmaps).
+pub const LOD_CHOICES: &[u32] = &[0, 1, 2, 3];
+static LOD: AtomicU32 = AtomicU32::new(0);
+
+/// The saved choice (REG_DWORD `TextureLod`, default 0).
+pub fn texture_lod() -> u32 {
+    let v = super::advapi32::value("", "TextureLod")
+        .and_then(|(_, d)| Some(u32::from_le_bytes(d.get(..4)?.try_into().ok()?)));
+    v.filter(|v| LOD_CHOICES.contains(v)).unwrap_or(0)
+}
+
+/// The settings menu: saved, and used from the next batch on.
+pub fn set_texture_lod(n: u32) {
+    super::advapi32::set_value("", "TextureLod", 4, &n.to_le_bytes());
+    LOD.store(n, Ordering::Relaxed);
+}
+
 /// Multisample anti-aliasing: samples per pixel (0 off).
 pub const MSAA_CHOICES: &[u32] = &[0, 2, 4, 8];
 static MSAA: AtomicU32 = AtomicU32::new(4);
@@ -214,6 +234,7 @@ pub fn set_msaa(n: u32) {
 /// At start, after the EXE is loaded.
 pub fn init() {
     FILTER.store(filtering(), Ordering::Relaxed);
+    LOD.store(texture_lod(), Ordering::Relaxed);
     MSAA.store(msaa(), Ordering::Relaxed);
 }
 
@@ -242,6 +263,8 @@ struct Glide {
     ms: Option<(glow::Renderbuffer, u32, u64, glow::Renderbuffer)>,
     made: u64,
     ms_max: u32,
+    /// a picture kept (`keep_picture`): its renderbuffer, the target's size and the samples
+    kept: Option<(glow::Renderbuffer, (u32, u32), u32)>,
     prog: glow::Program,
     vbo: glow::Buffer,
     /// what contexts do not share (vertex arrays, framebuffers), per thread drawing
@@ -424,6 +447,7 @@ uniform sampler2DArray tex;     // rgb * coverage, coverage
 uniform sampler2DArray tex_a;   // alpha * coverage, alpha * (1 - coverage)
 uniform sampler2DArray tex_hd;  // replacements: rgb * coverage, coverage, larger
 uniform int mipmaps;            // filtered by the GPU with mipmaps
+uniform float lod_bias;        // log2: below 0 sharper in the distance (`texture_lod`)
 uniform ivec2 clamp_st;
 uniform int chroma;
 uniform vec3 key;
@@ -478,6 +502,8 @@ vec4 sample_mip(out float cover) {
     // clamped (or a rectangle inside the texture): never past the texture's edge
     lo = clamp(lo, vec2(0.0), ts);
     hi = clamp(hi, lo, ts);
+    dx *= exp2(lod_bias);
+    dy *= exp2(lod_bias);
     float lod = log2(max(max(length(dx), length(dy)), 1e-8));
     float top = max(log2(max(min(hi.x - lo.x, hi.y - lo.y), 1.0)) - 2.0, 0.0);
     if (lod > top) {
@@ -645,6 +671,7 @@ struct Uniforms {
     tex_a: Option<glow::UniformLocation>,
     tex_hd: Option<glow::UniformLocation>,
     mipmaps: Option<glow::UniformLocation>,
+    lod_bias: Option<glow::UniformLocation>,
     clamp_st: Option<glow::UniformLocation>,
     chroma: Option<glow::UniformLocation>,
     key: Option<glow::UniformLocation>,
@@ -665,6 +692,7 @@ impl Uniforms {
             tex_a: u("tex_a"),
             tex_hd: u("tex_hd"),
             mipmaps: u("mipmaps"),
+            lod_bias: u("lod_bias"),
             clamp_st: u("clamp_st"),
             chroma: u("chroma"),
             key: u("key"),
@@ -1064,6 +1092,7 @@ impl Glide {
                 ms: None,
                 made: 0,
                 ms_max: gl.get_parameter_i32(glow::MAX_SAMPLES).max(0) as u32,
+                kept: None,
                 prog,
                 vbo,
                 locals: HashMap::new(),
@@ -1353,6 +1382,44 @@ impl Glide {
         }
     }
 
+    /// Copy the picture's colour between the framebuffer drawn into and the kept picture
+    /// (`keep`: into it, made at the target's size and samples first; else back, if one of
+    /// this size is kept).
+    fn kept_copy(&mut self, gl: &glow::Context, keep: bool) {
+        self.flush(gl);
+        let samples = self.ms.map_or(0, |m| m.1);
+        let fits = |k: &(glow::Renderbuffer, (u32, u32), u32)| k.1 == self.target && k.2 == samples;
+        unsafe {
+            if !self.kept.as_ref().is_some_and(fits) {
+                if !keep {
+                    return;
+                }
+                if let Some((rb, ..)) = self.kept.take() {
+                    gl.delete_renderbuffer(rb);
+                }
+                let rb = gl.create_renderbuffer().expect("GL renderbuffer");
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(rb));
+                let (w, h) = (self.target.0 as i32, self.target.1 as i32);
+                gl.renderbuffer_storage_multisample(glow::RENDERBUFFER, samples as i32, glow::RGBA8, w, h);
+                self.kept = Some((rb, self.target, samples));
+            }
+            let rb = self.kept.unwrap().0;
+            let drawn = self.draw_fbo(gl);
+            // a framebuffer of this thread's for the kept picture, for this copy
+            let f = gl.create_framebuffer().expect("GL framebuffer");
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(f));
+            gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::RENDERBUFFER, Some(rb));
+            let (from, to) = if keep { (drawn, f) } else { (f, drawn) };
+            let (w, h) = (self.target.0 as i32, self.target.1 as i32);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(from));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(to));
+            gl.blit_framebuffer(0, 0, w, h, 0, 0, w, h, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            gl.delete_framebuffer(f);
+        }
+    }
+
     /// The multisampled picture into the texture shown.
     fn resolve(&mut self, gl: &glow::Context) {
         if let Some(fbo) = self.ms_fbo(gl) {
@@ -1402,6 +1469,8 @@ impl Glide {
             let filter = FILTER.load(Ordering::Relaxed);
             let mipmaps = filter != 0 && s.key & 0xff_ffff == 0;
             gl.uniform_1_i32(u.mipmaps.as_ref(), mipmaps as i32);
+            let bias = -0.5 * LOD.load(Ordering::Relaxed) as f32;
+            gl.uniform_1_f32(u.lod_bias.as_ref(), bias);
             gl.uniform_1_i32(u.tex_a.as_ref(), 1);
             gl.uniform_1_i32(u.tex.as_ref(), 0);
             gl.uniform_1_i32(u.tex_hd.as_ref(), 2);
@@ -2689,6 +2758,19 @@ fn buffer_swap(_: &mut Cpu) -> u32 {
     0
 }
 
+/// Keep the picture drawn so far (its colour), for `restore_picture`. Motorhead's motion blur
+/// draws each picture over the last one: with pictures between logic frames each starts from
+/// the logic frame's own, as at the game's frame rate.
+pub fn keep_picture() {
+    with(|g, gl| g.kept_copy(gl, true));
+}
+
+/// Put the kept picture's colour back into the picture being drawn (nothing if none is kept at
+/// this size).
+pub fn restore_picture() {
+    with(|g, gl| g.kept_copy(gl, false));
+}
+
 /// The coordinate space of the vertices that follow (None: screen pixels).
 pub fn set_space(space: Option<(u32, u32)>) {
     with(|g, gl| {
@@ -2823,6 +2905,10 @@ fn tex_combine(c: &mut Cpu) -> u32 {
 
 fn constant_color(c: &mut Cpu) -> u32 {
     let v = arg(c, 0);
+    let from = mem().rd32(c.r[recomp::rt::ESP]);
+    let v = crate::game::game()
+        .glide()
+        .map_or(v, |x| x.constant_color(v, from));
     with(|g, _| g.constant = v);
     0
 }
