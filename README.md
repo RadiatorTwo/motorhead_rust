@@ -7,6 +7,21 @@ Windows/DirectX functions it calls are implemented in Rust (the game's 3dfx Glid
 OpenGL, DirectDraw for the menus, DirectSound, the CD's music). No game code or data is part
 of this repository or its releases: you need your own copy of the game.
 
+![A race on Goldbridge at 1440x1080](docs/screenshots/race.png)
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/start.png" alt="The start at night, headlights and halos"></td>
+    <td width="33%"><img src="docs/screenshots/bridge.png" alt="Under the bridge"></td>
+    <td width="33%"><img src="docs/screenshots/menu.png" alt="The main menu"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>The start at night: headlights and halos</em></td>
+    <td align="center"><em>Under the bridge</em></td>
+    <td align="center"><em>The main menu</em></td>
+  </tr>
+</table>
+
 Built with [recomp_kit].
 
 ## Playing
