@@ -64,13 +64,13 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound: waveOut plays
   into the mixer's stream (`waveout.rs`, 2026-11-26: Smacker opens 44100 Hz stereo 16 bit,
   CALLBACK_NULL, writes 11264 frames at a time and polls WHDR_DONE). To hear: the intro.
-- [ ] saving and loading (league, records)
+- [x] saving and loading (league, records)
   2026-11-26: after a race the game writes HiScores\<track>.CL, <track>01.CR, *.MHI; the
   folder HiScores is not in the cab, and `inside_game` refused writes into a missing folder
   (32 tries per file). Now: the nearest existing folder decides, a missing one is made
-  (test in kernel32.rs; in recomp_kit 92f1a06). Seen in the user's own game: HiScores\Goldbridge* written after a
-  race and shown again as the best lap, a league saved (League\League20000.LGF). Still to
-  see: the league loaded again.
+  (test in kernel32.rs; in recomp_kit 92f1a06). Seen in the user's own game: after a race
+  HiScores\Goldbridge* written and shown again as the best lap, a league saved
+  (League\League20000.LGF) and loaded again (2026-11-26).
   Open: rec7's replay (a race to the finish, savestate loaded) does not reach the finish:
   the replay goes another way than the recording.
 - [ ] the whole game played through
