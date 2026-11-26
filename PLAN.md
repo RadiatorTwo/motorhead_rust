@@ -86,7 +86,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 - `user32.rs`: keyboard (GetKeyNameTextA, MapVirtualKeyA, ToAscii, Get/SetKeyboardState,
   layout name), clipboard (none), small ones. `advapi32.rs`: RegOpenKeyA.
 
-## Kit (not yet taken over)
+## Kit (taken over into recomp_kit 800729a, 2026-11-26)
 
 - `glide.rs` `read_depth`: grLfbLock of the depth buffer (AUXBUFFER, read) gives the z values
   (ooz) at the screen's size; was the picture's colours. Motorhead tests each light's
@@ -101,6 +101,9 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 - `glide.rs` `read_screen` (grLfbLock for reading, grLfbReadRegion): the view brought down to
   the Glide screen's size on the GPU (blit, nearest) and only that read back (`read_fbo`):
   reading the whole window-sized target was ~30% of a race.
+
+## Kit (not yet taken over)
+
 - `tween.rs` `Statics`: a buffer per range (an image with a gap between its parts needs one
   `Statics` per part: Motorhead's DGROUP and .bss; reading the gap crashed).
 - `sample.rs`: `SAMPLE_RAW` writes a file per 2 s (`<path>.<n>`), not only the last.
