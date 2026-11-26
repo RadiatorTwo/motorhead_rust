@@ -100,7 +100,13 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
   `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
   gives 40 mph where full gives 117. The user: menu with A works, analog fine; steering squared (linear was twitchy).
-- [ ] release (tag `v*`)
+- [x] release (tag `v*`): v0.3.0, v0.3.1 (2026-11-27)
+- [x] Linux under Wayland hung at the loading screen (2026-11-27): EGL lets the window's
+  surface be current in one thread only; the present thread's shared context got
+  EGL_BAD_ACCESS and died at the first Glide picture. Off Windows a context now holds the
+  surface only while drawing into the window (`gl.rs` take_surface/release_surface), else
+  current surfaceless. Checked in WSL: the panic gone, rec8 races under X11. Wayland in WSLg
+  itself crashes in libEGL_mesa in the menu (old build too): not ours.
 
 ## Kit (taken over into recomp_kit 358ec43, 2026-11-25)
 
@@ -141,6 +147,8 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 
 ## Kit (not yet taken over)
 
+- `gl.rs`: off Windows the window surface current in one thread at a time (see 4. Port,
+  Wayland). Not yet in recomp_kit.
 - `waveout.rs` (new, WINMM): one waveOut device into `dsound::stream_*` (was: no device);
   headers done when the mixer has played them (a host thread), callbacks none/event/function.
   Taken over into recomp_kit 02e4dcb (2026-11-26).
