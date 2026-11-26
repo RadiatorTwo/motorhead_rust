@@ -126,6 +126,14 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   on Motorhead's page Advanced. Tests at the start and at 116 mph: the bias works (+4 blurs
   everything), -1 shows more grain on the road. Close to the car the blur is the original's
   low-resolution textures, no bias helps there (2026-11-26).
+- `glide.rs` `sample_mip`: the level for the clamp margin and `top` is now the one the GPU
+  picks with anisotropy (max(long / aniso, short), uniform `aniso`), not the long axis.
+  With the long axis a lane line far ahead was pulled into the middle of its rectangle and
+  vanished (rec5: line on the start straight, fine with point sampling) (2026-11-26).
+  The clamp margin is per axis: half the footprint's reach on that axis (|dx| + |dy|) / 2
+  plus half a texel of the level. Seen flat along a road, the anisotropic samples reached
+  the atlas rows above and below the road's rectangle (black, brown): flickering dark
+  cross lines between the road pieces, only when looking along the road (2026-11-26).
 
 - `game.rs`/`glide.rs`: `GlideExt::constant_color(value, from)` (a game sees where a
   constant colour is set), `glide::keep_picture` / `restore_picture` (the colour of the

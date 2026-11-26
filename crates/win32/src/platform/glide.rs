@@ -448,6 +448,7 @@ uniform sampler2DArray tex_a;   // alpha * coverage, alpha * (1 - coverage)
 uniform sampler2DArray tex_hd;  // replacements: rgb * coverage, coverage, larger
 uniform int mipmaps;            // filtered by the GPU with mipmaps
 uniform float lod_bias;        // log2: below 0 sharper in the distance (`texture_lod`)
+uniform float aniso;           // the GPU's anisotropy (1: none)
 uniform ivec2 clamp_st;
 uniform int chroma;
 uniform vec3 key;
@@ -504,7 +505,12 @@ vec4 sample_mip(out float cover) {
     hi = clamp(hi, lo, ts);
     dx *= exp2(lod_bias);
     dy *= exp2(lod_bias);
-    float lod = log2(max(max(length(dx), length(dy)), 1e-8));
+    // the level the GPU picks: with anisotropy the long axis of a pixel's footprint is
+    // covered by up to `aniso` samples, so the short axis (or long / aniso) decides. Taking
+    // the long axis here pulled a road's lane line far away into the middle of its rectangle.
+    float major = max(length(dx), length(dy));
+    float minor = min(length(dx), length(dy));
+    float lod = log2(max(max(major / aniso, minor), 1e-8));
     float top = max(log2(max(min(hi.x - lo.x, hi.y - lo.y), 1.0)) - 2.0, 0.0);
     if (lod > top) {
         float k = exp2(top - lod);
@@ -512,7 +518,11 @@ vec4 sample_mip(out float cover) {
         dy *= k;
         lod = top;
     }
-    vec2 m = vec2(0.5 * exp2(max(lod, 0.0)));
+    // the margin per axis: half the footprint's reach along that axis (anisotropy reads along
+    // the long axis, seen flat along a road far beyond a texel) and half a texel of the level.
+    // One margin for both axes either pulled a thin line at the rectangle's side into the
+    // middle (from the long axis) or let a road read its atlas neighbours ahead (the short).
+    vec2 m = 0.5 * (abs(dx) + abs(dy)) + vec2(0.5 * exp2(max(lod, 0.0)));
     vec2 p = clamp(q, lo + min(m, (hi - lo) * 0.5), hi - min(m, (hi - lo) * 0.5));
     vec3 uv = vec3(p / size, float(layer));
     vec4 c = textureGrad(tex, uv, dx / size, dy / size);
@@ -672,6 +682,7 @@ struct Uniforms {
     tex_hd: Option<glow::UniformLocation>,
     mipmaps: Option<glow::UniformLocation>,
     lod_bias: Option<glow::UniformLocation>,
+    aniso: Option<glow::UniformLocation>,
     clamp_st: Option<glow::UniformLocation>,
     chroma: Option<glow::UniformLocation>,
     key: Option<glow::UniformLocation>,
@@ -693,6 +704,7 @@ impl Uniforms {
             tex_hd: u("tex_hd"),
             mipmaps: u("mipmaps"),
             lod_bias: u("lod_bias"),
+            aniso: u("aniso"),
             clamp_st: u("clamp_st"),
             chroma: u("chroma"),
             key: u("key"),
@@ -1475,6 +1487,7 @@ impl Glide {
             gl.uniform_1_i32(u.tex.as_ref(), 0);
             gl.uniform_1_i32(u.tex_hd.as_ref(), 2);
             let aniso = (filter.max(1) as f32).min(self.aniso_max);
+            gl.uniform_1_f32(u.aniso.as_ref(), aniso.max(1.0));
             if let Some(hd) = &mut self.hd {
                 gl.active_texture(glow::TEXTURE2);
                 gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(hd.array));
