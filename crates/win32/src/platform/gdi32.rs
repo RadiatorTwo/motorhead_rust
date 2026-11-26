@@ -886,8 +886,11 @@ fn stretch_dibits(c: &mut Cpu) -> u32 {
     if wd == 0 || hd == 0 || ws == 0 || hs == 0 {
         return 0;
     }
-    // the source rectangle's top row, counted from the image's top
-    let top = if bottom_up { rows - ys - hs.abs() } else { ys };
+    // the source rectangle's top row, counted from the image's top. Windows counts ySrc from
+    // the image's bottom even for a top-down DIB: Smacker draws each frame's changed part
+    // (destination y 88, source y 136, 256 rows of 480), and counted from the top the rows
+    // came from elsewhere each frame (the videos jumped up and down).
+    let top = rows - ys - hs.abs();
     let source = |sx: i32, sy: i32| -> u32 {
         if sx < 0 || sx >= w || sy < 0 || sy >= rows {
             return 0;

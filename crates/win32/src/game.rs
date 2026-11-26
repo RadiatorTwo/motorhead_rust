@@ -33,7 +33,8 @@ pub struct Identity {
     pub computer_name: &'static str,
     /// the game's registry key: "HKEY_LOCAL_MACHINE\\Software\\Electronic Arts\\Future Cop"
     pub registry_key: &'static str,
-    /// REG_SZ values the installer wrote into that key (Future Cop: Group = 3Dfx)
+    /// REG_SZ values the installer wrote into that key (Future Cop: Group = 3Dfx); a name with
+    /// a backslash is a value of another key, its full path ("HKEY_LOCAL_MACHINE\\...\\Name")
     pub registry_seed: &'static [(&'static str, &'static str)],
     /// the game folder's name in `game_files` (and on the CD): "FCopLAPD"
     pub folder: &'static str,

@@ -29,3 +29,7 @@
 0x41a608 Camera_Make  the camera's derived values (eax): +0xc..+0x14, the view's corners and planes from +0x4c
 0x4bc2f8 Glide_Scene  the renderer's +0x34: the race's 3D (lights test, track, cars); +0x68 (0x4be144) then switches to 2D for the HUD (hooked: wide.rs)
 0x80b9c8 glide_view  Glide's copy of the view (the renderer's +0x30, 0x4bc2b4)
+0x43b890 Copy_Check  reads HKLM\Software\Digital Illusions\Motorhead InstallDir (names encrypted: each byte minus its index & 7); [0x4da8e8] = 1 if found (seeded in main.rs)
+0x4da8e8 g_copy_ok  0: copy protection failed; 0x43ac19, 0x43ad40, 0x43ae70 then add rand()*80 to [0x79eebc] (the race's end crashed in 0x46fc78)
+0x79eebc g_track_path  the track's path (0x47081c makes it), passed to 0x4706d8
+0x4c181c rand  Watcom rand (seed through 0x4c1812)

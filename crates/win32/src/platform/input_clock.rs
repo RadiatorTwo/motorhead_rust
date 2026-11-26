@@ -17,8 +17,12 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-/// Without a logic frame for this long the game has left its loop: real time again.
-const LEFT: Duration = Duration::from_secs(1);
+/// Without a logic frame for this many frames (at least `LEFT_MIN`) the game has left its
+/// loop: real time again, the input no longer waits for frames. (Was a second: Motorhead's
+/// "Quit to menu" left Enter pressed for the menu, its release held back, and the menu went
+/// on through its pages into a new race.)
+const LEFT_FRAMES: u32 = 6;
+const LEFT_MIN: Duration = Duration::from_millis(100);
 /// A start without a logic frame for this long was none (a menu): real time again.
 const NO_START: Duration = Duration::from_secs(10);
 
@@ -48,7 +52,10 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
         open: false,
     });
     // out of the loop: on with the real time from the last frame
-    if s.logic.is_some() && s.at.elapsed() >= LEFT {
+    if s
+        .logic
+        .is_some_and(|f| s.at.elapsed() >= (f * LEFT_FRAMES).max(LEFT_MIN))
+    {
         s.logic = None;
     }
     if s.held && s.at.elapsed() >= NO_START {

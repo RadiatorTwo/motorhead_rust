@@ -60,8 +60,13 @@ fn unhex(s: &str) -> Vec<u8> {
 impl Registry {
     fn load(&mut self) {
         // what the installer wrote into the game's key (Future Cop: the renderer, Glide)
-        let k = self.key_mut(game_key());
+        // (a name with a backslash is a value of another key: its full path, then the name)
         for (name, v) in crate::game::id().registry_seed {
+            let (key, name) = match name.rsplit_once('\\') {
+                Some((key, name)) => (key, name),
+                None => (game_key(), *name),
+            };
+            let k = self.key_mut(key);
             k.insert(name.to_string(), (REG_SZ, format!("{v}\0").into_bytes()));
         }
         if let Ok(text) = std::fs::read_to_string(game_dir().join("registry.txt")) {

@@ -954,6 +954,7 @@ static LAST_CALL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::n
 
 /// Report an access violation in guest memory (a bad game pointer) before the process dies.
 fn report_fault(kind: &str, a: usize, pc: usize) {
+    record::crashed();
     let base = mem().base as usize;
     if a >= base && a - base < rt::GUEST_SPAN {
         // the recompiled function the host code belongs to: the nearest start below it
@@ -1041,6 +1042,7 @@ fn fatal(c: &Cpu, msg: &str) -> ! {
     let stack: Vec<String> = (0..8)
         .map(|k| format!("{:08x}", m.rd32(sp + 4 * k)))
         .collect();
+    record::crashed();
     log!("fatal: {msg}");
     log!(
         "  eax {:08x} ecx {:08x} edx {:08x} ebx {:08x}",

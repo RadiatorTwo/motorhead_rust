@@ -82,15 +82,21 @@ impl Recorder {
             Input::Wheel(n) => out.push(format!("{t}:wheel@{n}")),
             Input::Focus(f) => out.push(format!("{t}:{}", if f { "focus" } else { "blur" })),
             Input::Close => {
-                // what is still held ends here
-                for (name, since) in std::mem::take(&mut self.held) {
-                    out.push(format!("{since}:{name}*{}", t.saturating_sub(since).max(1)));
-                }
-                out.extend(self.pad(&[0.0; PAD_CONTROLS], t));
+                out = self.end(t);
                 out.push(format!("{t}:close"));
             }
             _ => {}
         }
+        out
+    }
+
+    /// What is still held ends at `t` (the window closed, the game crashed).
+    pub fn end(&mut self, t: u64) -> Vec<String> {
+        let mut out = Vec::new();
+        for (name, since) in std::mem::take(&mut self.held) {
+            out.push(format!("{since}:{name}*{}", t.saturating_sub(since).max(1)));
+        }
+        out.extend(self.pad(&[0.0; PAD_CONTROLS], t));
         out
     }
 
@@ -201,6 +207,20 @@ pub fn input(i: &Input) {
     if matches!(i, Input::Close) {
         let _ = f.file.flush();
     }
+}
+
+/// The game crashed: what is still held is written (else a key held then, the throttle in a
+/// race, was missing from the recording and its replay went another way).
+pub fn crashed() {
+    if !on() {
+        return;
+    }
+    // no waiting in a crash: the lock may be the crashing thread's
+    let Ok(mut r) = RECORD.try_lock() else { return };
+    let Some(f) = r.as_mut() else { return };
+    let lines = f.rec.end(super::input_clock::stamp());
+    write(f, lines);
+    let _ = f.file.flush();
 }
 
 /// The recording's file, while recording.

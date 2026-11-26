@@ -483,7 +483,7 @@ fn dd_restore_display_mode(_: &mut Cpu) -> u32 {
 }
 
 fn dd_get_monitor_frequency(c: &mut Cpu) -> u32 {
-    mem().wr32(arg(c, 1), 60);
+    mem().wr32(arg(c, 1), FLIP_HZ as u32);
     OK
 }
 
@@ -816,8 +816,20 @@ fn s_flip(c: &mut Cpu) -> u32 {
     d.surfaces.get_mut(&back).unwrap().pixels = a;
     shown();
     present(&d);
+    drop(d);
+    // a real flip waits for the display's next refresh: games that count frames (Motorhead's
+    // menus) ran at hundreds of frames a second without it. The modes of the time ran at
+    // 60 Hz, as GetMonitorFrequency says. DDFLIP_NOVSYNC (DirectX 6) does not wait.
+    if arg(c, 2) & DDFLIP_NOVSYNC == 0 {
+        super::without_turn(|| FLIP_PACE.pace(Duration::from_secs_f64(1.0 / FLIP_HZ)));
+    }
     OK
 }
+
+const DDFLIP_NOVSYNC: u32 = 8;
+/// The refresh rate a flip waits for (`dd_get_monitor_frequency` says the same).
+const FLIP_HZ: f64 = 60.0;
+static FLIP_PACE: super::tween::Pacer = super::tween::Pacer::new();
 
 fn s_get_attached_surface(c: &mut Cpu) -> u32 {
     let (this, caps, out) = (arg(c, 0), arg(c, 1), arg(c, 2));

@@ -43,7 +43,13 @@ static ID: Identity = Identity {
     computer_name: "PC",
     // the game keeps its settings in game\MotorHead.CFG; the registry only holds A3D's key
     registry_key: r"HKEY_LOCAL_MACHINE\Software\Gremlin\Motorhead",
-    registry_seed: &[],
+    // what the installer wrote: the copy protection (0x43b890) reads InstallDir and, without
+    // it, throws the track's path pointer off at the finish (0x43ac19 and two more: the race's
+    // end crashed in 0x46fc78)
+    registry_seed: &[(
+        r"HKEY_LOCAL_MACHINE\Software\Digital Illusions\Motorhead\InstallDir",
+        r"C:\Motorhead",
+    )],
     // files and folders next to the EXE without which the game cannot start
     required: &["Data", "Cars", "Tracks", "Game", "Sounds", "League", "SMACKW32.DLL"],
     // other files kept in the game folder (saves, the game's own settings)

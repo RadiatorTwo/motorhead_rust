@@ -19,7 +19,8 @@
 - Open: rec3's savestate is no longer loaded ("heap blocks saved 460, now 504", the same up to
   block 12): seen 2026-11-26 before and after the kit merge, so older than it; the menu part
   of the replay going another way (real time), or a change to what the game allocates.
-- Open: crash seen twice in 10 runs (0x46fc88 path object; diagnostic hook logs it); the
+- The crash in 0x46fc88 (path object) was the copy protection (see 3. Playing). Recordings
+  made before 2026-11-26 16:00 ran with it failed (their savestates keep it so). The
   menu part of a replay runs in real time (an early Enter may miss the intro skip); kit
   changes below not yet in recomp_kit.
 
@@ -55,9 +56,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [x] pictures between logic frames (2026-11-26): the race's drawing 0x4775d8 runs again
   while the next frame is not due, the static data put back (`frames.rs`); cars and camera
   interpolated (`pictures.rs`)
-- [ ] crash seen once in the demo, not again in ~6 runs: read at 0x2e4 in 0x46fc88 (a
-  track/spline object with [+4] = 0; 0x4710xx frees such an object and zeroes [+4]).
-  Watch for it.
+- [x] crash at the race's end (and now and then in the demo) in 0x46fc88: the copy
+  protection 0x43b890 reads HKLM\Software\Digital Illusions\Motorhead InstallDir; without
+  it ([0x4da8e8] = 0) 0x43ac19 and two more add rand()*80 to the track's path pointer
+  [0x79eebc]. The value is seeded now (`registry_seed`, 2026-11-26). To check: a race played
+  to the finish (rec4's replay cannot: recorded with the protection failed).
 - [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound (waveOut: none)
 - [ ] saving and loading (league, records)
 - [ ] the whole game played through
@@ -117,6 +120,21 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   reading the whole window-sized target was ~30% of a race.
 
 ## Kit (not yet taken over)
+
+- `advapi32.rs`/`game.rs`: a `registry_seed` name with a backslash is a value of another key
+  (its full path). `record.rs` `crashed`: keys still held are written at a crash (rec4 lost
+  its throttle).
+
+- `ddraw.rs` `s_flip`: a flip waits for the next refresh at 60 Hz (`FLIP_HZ`, the same as
+  GetMonitorFrequency) unless DDFLIP_NOVSYNC. Motorhead's menus count frames and ran at
+  ~520 frames a second, far too fast (2026-11-26).
+- `gdi32.rs` `stretch_dibits`: ySrc counted from the image's bottom for top-down DIBs too
+  (as Windows does). Smacker draws each frame's changed part, which came from the wrong rows:
+  the videos jumped up and down (2026-11-26).
+- `input_clock.rs`: the logic loop counts as left after 6 frames without one (at least
+  100 ms), was a second. "Quit to menu" left Enter pressed for the menu (its release held back
+  by the gate, a script's by the standing time), and the menu went on into a new race. A
+  stall over 100 ms in a race now lets the time run on (a replay could go another way there).
 
 - `setup.rs` `videos`: the videos' folder keeps its name on the CD (Motorhead reads
   `D:\Movies\movies.pak`; was always `game_files/Video`). Other games' CDs call it Video.
