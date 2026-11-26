@@ -70,7 +70,8 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
   at 60 Hz in `src/frames.rs`. Replays: `MOTORHEAD_INPUT=@recN.txt` loads
   `recN.txt.1.state` at the race's first frame (made by `MOTORHEAD_RECORD=recN.txt`). Test
   switches: `MOTORHEAD_RACE_LOG=n` (positions every n frames), `MOTORHEAD_STATE_DUMP=file`.
-- Never run the game without the user's go: each run opens a window on their screen.
+- Test runs of the game need no asking (the user's standing go): launch with PowerShell
+  `Start-Process -Wait` (a GUI exe, PowerShell does not wait otherwise).
 - Watcom runtime 0x4cde6f: `call +x` over a table, `pop edi; ret` (hooked: `pow10_table`).
 
 ## How it works (this game's own)

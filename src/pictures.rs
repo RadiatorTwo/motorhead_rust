@@ -6,8 +6,9 @@
 //!
 //! - A car (`[CARS + i * PLAYER]`, 8 players): its rotation (3x3 floats) at +4, its place at
 //!   +0x28 (0x49dad0 builds a matrix from them).
-//! - The camera (`CAMERA`, built by the logic from the followed car): rotation at +0x10, place
-//!   at +0x40; the drawing turns it into the view (0x419750, into 0x73a118).
+//! - The camera (`CAMERA`, built by the logic from the followed car): rotation at +0x1c (the
+//!   car's matrix turned over by 0x419840), place at +0x40; the drawing turns it into the view
+//!   (0x419750, into 0x73a118). (+0 to +0x1c is its projection, `wide.rs`.)
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -46,7 +47,7 @@ static HIST: Mutex<Option<HashMap<Mover, Hist<Pose>>>> = Mutex::new(None);
 fn movers() -> Vec<Mover> {
     let m = mem();
     let mut v = vec![Mover {
-        rot: CAMERA + 0x10,
+        rot: CAMERA + 0x1c,
         at: CAMERA + 0x40,
     }];
     for i in 0..PLAYERS {

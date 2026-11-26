@@ -12,6 +12,7 @@ mod pictures;
 mod hooks;
 mod loaded;
 mod sprites;
+mod wide;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;
@@ -96,7 +97,7 @@ impl Game for MyGame {
     }
 
     fn options(&self) -> Vec<options::Page> {
-        // the port's settings menu (F10); widescreen once there is one (GUIDE 8c)
+        // the port's settings menu (F10)
         vec![options::Page {
             title: "Display",
             rows: vec![
@@ -105,6 +106,7 @@ impl Game for MyGame {
                 options::anti_aliasing(),
                 options::textures(),
                 options::frame_rate_display(),
+                wide::option(),
             ],
         }]
     }

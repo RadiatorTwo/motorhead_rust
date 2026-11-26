@@ -16,11 +16,16 @@
 0x4775d8 Race_Draw  buffer swap, then the track, the cars and the HUD through the renderer's table (hooked: pictures between frames)
 0x4bab5c Clock_Advance  the game's clock [0x7e9f9c] on by the time since the last call times a speed (hooked: fixed rate)
 0x49dad0 Car_Matrix  matrix (eax) from a car object (edx): rotation 3x3 floats at +4, place at +0x28
-0x419840 Camera_Set  camera (eax: rotation at +0x10, place at +0x40) from a matrix (edx)
+0x419840 Camera_Set  camera (eax: rotation at +0x1c, the matrix's turned over; place at +0x40) from a matrix (edx)
 0x419750 Camera_View  the view 0x73a118 from the camera 0x739f80
-0x739f80 camera  rotation at +0x10, place at +0x40
+0x739f80 camera  +0 focal length 1/tan(half fov x), +4 near, +8 far, +0xc tan, +0x18 height over width, rotation at +0x1c, place at +0x40, corners and planes from +0x4c (0x198 bytes)
 0x7499a9 player_car  the car object of player i at [0x7499a9 + i * 0x2c00] (8 players)
 0x747e28 player_viewed  the player the camera follows
 0x77d95c renderer  [+0x298]: its function table (Glide's at 0x505eb0: +0x28 the buffer swap)
 0x4be458 Glide_LightsVisible  locks the depth buffer (grLfbLock AUXBUFFER, read) and sets each light's [+0x40] = depth there < its z ([+0x44] x, [+0x48] y, [+0x4c] z, next [+0x50]): halos and lens flares drawn or not
 0x80bbfc glide_grLfbLock  pointer from GetProcAddress (the Glide pointers are at 0x80bb8c..0x80bc10)
+0x41a3a4 Camera_SetFov  +0 = 1/tan(fov/2) from degrees (arg), clamped 0.5..10, then Camera_Make
+0x41a5f0 Camera_SetAspect  +0x18 = 1 / arg (the race's: viewport w/h x 0.5)
+0x41a608 Camera_Make  the camera's derived values (eax): +0xc..+0x14, the view's corners and planes from +0x4c
+0x4bc2f8 Glide_Scene  the renderer's +0x34: the race's 3D (lights test, track, cars); +0x68 (0x4be144) then switches to 2D for the HUD (hooked: wide.rs)
+0x80b9c8 glide_view  Glide's copy of the view (the renderer's +0x30, 0x4bc2b4)

@@ -6,7 +6,10 @@
   cars and camera interpolated, the race log of rec3 unchanged. The user saw no problems
   (sound, gameplay). Next: the user plays a race and looks for stutter or lag (the names over
   the cars, the wheels, the HUD's map are not interpolated); then widescreen / resolution.
-- Test runs need no asking any more (the user's standing go, 2026-11-25). Launch with
+- Camera interpolation fixed (2026-11-26): its rotation is at +0x1c, not +0x10 (three of its
+  nine values were never interpolated).
+- Test runs need no asking any more (the user's standing go, 2026-11-25; CLAUDE.md said
+  otherwise until 2026-11-26 and the permission filter blocked runs because of it). Launch with
   `Start-Process -Wait` (GUI exe: PowerShell does not wait otherwise).
 - Replays: `MOTORHEAD_INPUT=@rec3.txt` (+ `rec3.txt.1.state`), `MOTORHEAD_RACE_LOG=60`;
   compare the `race *` lines with an earlier run (1342 lines). Times after `sync@0` are ms.
@@ -66,7 +69,12 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   groups Program Executable Files, Data; Spawned = motorm.exe left out), the CD's Movies folder
   copied (`video_marker: movies.pak`). Tried: .bin + .cue alone in an empty game_files: 1208
   files, the same as installed by hand; demos and CD music ran. The image stays (CD audio).
-- [ ] high resolution, widescreen, settings (the kit's F10 menu: page Display with fullscreen,
+- [x] widescreen (2026-11-26, `wide.rs`): the camera's focal length (+0) and height over
+  width (+0x18) times (4/3)/aspect, the camera made again (0x41a608), the 3D (Glide's +0x34)
+  over the whole frame, the HUD in the 4:3 middle with the camera's own values. Seen in a
+  1280x720 window with rec3: wide, nothing stretched, HUD and names over the cars right.
+  F10 page Display row Widescreen.
+- [ ] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate; not tried in the game yet)
 - [ ] gamepad
 - [ ] release (tag `v*`)

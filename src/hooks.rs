@@ -21,6 +21,7 @@ pub fn all() -> Vec<(u32, Hook)> {
         (crate::frames::RACE_FRAME, crate::frames::race_frame),
         (crate::frames::CLOCK_ADVANCE, crate::frames::clock_advance),
         (crate::frames::RACE_DRAW, crate::frames::race_draw),
+        (crate::wide::SCENE, crate::wide::scene),
         (crate::font::FONT_DRAW, crate::font::draw),
         (crate::sprites::DRAW_CLIPPED, crate::sprites::draw_clipped),
         (crate::sprites::DRAW_STEP, crate::sprites::draw_step),

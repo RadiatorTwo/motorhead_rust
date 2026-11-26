@@ -121,7 +121,9 @@ pub fn race_draw(c: &mut Cpu) {
         crate::pictures::noted(FRAME.load(Ordering::Relaxed));
     }
     let alpha = LOGIC.alpha(PACER.next_shown());
-    crate::pictures::draw(alpha, || call_original(c, RACE_DRAW.at()));
+    crate::pictures::draw(alpha, || {
+        crate::wide::race_draw(c, |c| call_original(c, RACE_DRAW.at()))
+    });
 }
 
 /// A picture between logic frames: the race's drawing again, everything it changed in the
@@ -182,6 +184,10 @@ pub struct Frames;
 pub static FRAMES: Frames = Frames;
 
 impl GlideExt for Frames {
+    fn aspect(&self, window: Option<f32>) -> f32 {
+        crate::wide::aspect(window)
+    }
+
     fn before_shown(&self) {
         let p = pace();
         win32::platform::gl::set_vsync(true);
