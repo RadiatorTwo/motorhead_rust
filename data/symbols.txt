@@ -34,3 +34,6 @@
 0x79eebc g_track_path  the track's path (0x47081c makes it), passed to 0x4706d8
 0x4c181c rand  Watcom rand (seed through 0x4c1812)
 0x4bc497 Glide_Scene_BlurSet  return address of the scene's grConstantColorValue(0x80000000) with MotionBlur on (renderer +0x284): the scene is drawn at alpha 0x80 over the last picture, no clear (`blur.rs`); 0x4becc4 the same in 0x4bebcc
+0x43bd60 Control_Value  a task's control code (eax) active? strength 0..1 into [edx] (joystick axes analog, keys 1), ebx 1: only a new press (hooked: pad.rs)
+0x73ad18 control_tasks  the layout's control code per task, in the .clo order: TurnLeft, TurnRight, Accelerate, Brake, ShiftGearUp, ShiftGearDown, Horn, HandBrake, RearView, GameMenu, Info, ChatMode, InCarView, OutCarView, CameraView, RearMirror, CyclePlayers, ScreenShot
+0x43433c Joystick_Poll  DIJOYSTATE: buttons into 0x51c58c (dwords), axes minus their centre into 0x51c610 (x), 0x51c614 (y), 0x51c618 (z)

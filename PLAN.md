@@ -93,12 +93,13 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [x] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate): the user checked it with widescreen
   (2026-11-26)
-- [ ] gamepad (2026-11-26, `pad.rs`): in a race the pad presses the Keyboard layout's keys
-  once per logic frame (RT gas, LT brake, stick/D-pad steer, RB/LB gears, A handbrake, B horn,
-  Y rear view, X camera), whatever layout is chosen; in the menus A confirms, B is the second
-  button (the game confirms with the first: was RT). Kit: `Game::pad_buttons` (new). Tested
-  with the scripted pad (RT, LX); the user's real pad still to try. Steering is digital
-  (keys); analog only with the game's Joystick layout (not checked).
+- [ ] gamepad (2026-11-26, `pad.rs`): the game asks for each race task through 0x43bd60
+  (Control_Value, codes in 0x73ad18): hooked, the pad answers besides the chosen layout:
+  stick/D-pad steer and RT/LT gas/brake analog (strength 0..1, as the game's joystick axes),
+  RB/LB gears, A handbrake, B horn, Y rear view, X camera. In the menus A confirms, B is the
+  second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
+  `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
+  gives 40 mph where full gives 117. The user: menu with A works; analog to try.
 - [ ] release (tag `v*`)
 
 ## Kit (taken over into recomp_kit 358ec43, 2026-11-25)

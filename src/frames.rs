@@ -111,7 +111,6 @@ pub fn race_frame(c: &mut Cpu) {
             dump(&format!("{path}.{f}"));
         }
     }
-    crate::pad::race_frame();
     let t0 = Instant::now();
     call_original(c, RACE_FRAME.at());
     if race_log() {
