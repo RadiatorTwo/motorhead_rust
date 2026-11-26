@@ -86,7 +86,10 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   width (+0x18) times (4/3)/aspect, the camera made again (0x41a608), the 3D (Glide's +0x34)
   over the whole frame, the HUD in the 4:3 middle with the camera's own values. Seen in a
   1280x720 window with rec3: wide, nothing stretched, HUD and names over the cars right.
-  F10 page Display row Widescreen.
+  F10 page Display row Widescreen. Fixed 2026-11-26: the game projects y with the focal length
+  too, so the 3D came out lower by k (looked stretched sideways); now drawn 1/k times the
+  frame's height around the middle (`View::Tall`). Checked rec7 960x720 against 1280x720: the
+  car's proportions and the horizon the same.
 - [ ] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate; not tried in the game yet)
 - [ ] gamepad

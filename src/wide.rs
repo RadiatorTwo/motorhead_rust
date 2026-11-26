@@ -6,9 +6,11 @@
 //! the picture over its width (0x41a5f0); 0x41a608 makes the rest from them (+0xc the tan,
 //! the view's corners and planes from +0x4c on, which cut away what is outside). In a wide
 //! race picture the focal length and the height over width are made smaller by
-//! k = (4/3) / aspect (the field of view wider, its height the same) and the camera made
-//! again: the game still draws into its 512 columns, stretched over the whole frame
-//! (`View::Full`), so the proportions are right and the sides show more of the track.
+//! k = (4/3) / aspect and the camera made again. The game projects both x and y with the focal
+//! length, so the picture comes out lower by k too: the 3D is drawn stretched over the whole
+//! frame's width and 1 / k times its height around the middle, cut to the frame
+//! (`View::Tall`). The proportions are right, the sides show more of the track, the height
+//! shows what it did at 4:3.
 //!
 //! The race's drawing (0x4775d8) copies the camera into the view (0x73a118, Camera_View) and
 //! hands that to the renderer (Glide's +0x30 copies it to 0x80b9c8). The 3D is Glide's +0x34
@@ -102,7 +104,7 @@ pub fn race_draw(c: &mut Cpu, draw: impl FnOnce(&mut Cpu)) {
     if wide {
         widen(c, (4.0 / 3.0) / glide::frame_aspect());
         // the clear covers the whole frame
-        glide::set_view(View::Full);
+        glide::set_view(tall());
     }
     draw(c);
     // (the 3D's end put it back already; this is for a drawing that left out the 3D)
@@ -117,7 +119,7 @@ pub fn race_draw(c: &mut Cpu, draw: impl FnOnce(&mut Cpu)) {
 pub fn scene(c: &mut Cpu) {
     let wide = wide_now() && SAVED.lock().unwrap().is_some();
     if wide {
-        glide::set_view(View::Full);
+        glide::set_view(tall());
     }
     call_original(c, SCENE.at());
     if wide {
@@ -126,7 +128,14 @@ pub fn scene(c: &mut Cpu) {
     }
 }
 
-/// The camera's field of view wider by 1 / k, its height the same.
+/// The view the widened 3D is drawn in: the game projects x and y with the focal length, so
+/// the smaller one draws everything lower by k as well; the view puts the height back (1 / k
+/// = the frame's aspect over 4:3), the frame's width stretches the 512 columns.
+fn tall() -> View {
+    View::Tall(glide::frame_aspect() / (4.0 / 3.0))
+}
+
+/// The camera's field of view wider by 1 / k (its vertical one too, `tall` crops that back).
 fn widen(c: &mut Cpu, k: f32) {
     let m = mem();
     let cam = CAMERA.at();
