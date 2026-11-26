@@ -44,6 +44,11 @@ pub struct Identity {
     pub game_files: &'static [&'static str],
     /// a file in the CD's video folder (`setup` copies that folder), if the game has one
     pub video_marker: Option<&'static str>,
+    /// the game is on its CD only inside InstallShield cabinets (data1.cab, or data1.hdr with
+    /// data1.cab, data2.cab...): `setup` installs it from them, every file group but these
+    /// (the uninstaller, drivers, the videos the CD also has loose). None: the game's files lie
+    /// on the CD as they are
+    pub cab_left_out: Option<&'static [&'static str]>,
     /// 8 bytes each: the network discovery question and answer (UDP)
     pub net_magic: (&'static [u8; 8], &'static [u8; 8]),
     /// the log file next to the program in release builds: "fcop.log"
@@ -121,6 +126,16 @@ pub trait Game: Sync {
     /// "F12", "F10", "Pause"...; "" for none). The game does not see it: pick one it does not use.
     fn fps_key(&self) -> &'static str {
         "F12"
+    }
+
+    /// The pages of the port's settings menu (`options`): none, no menu.
+    fn options(&self) -> Vec<crate::platform::options::Page> {
+        Vec::new()
+    }
+
+    /// The key that opens and closes the settings menu (as `fps_key`). The game does not see it.
+    fn options_key(&self) -> &'static str {
+        "F10"
     }
 
     /// Debug commands by name in `<PREFIX>_INPUT` ("30000:win") and on Shift+F<n>.

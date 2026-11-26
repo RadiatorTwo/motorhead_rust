@@ -13,12 +13,16 @@
   `RACE_LOG` itself causes ~50 ms spikes: measure speed without it.
 - Profiling our own code: build with a link map into `target-map` (GUIDE 8a), run with
   `MOTORHEAD_SAMPLE=1 MOTORHEAD_SAMPLE_RAW=<file>` (a file per 2 s), resolve against the map.
+- Open: rec3's savestate is no longer loaded ("heap blocks saved 460, now 504", the same up to
+  block 12): seen 2026-11-26 before and after the kit merge, so older than it; the menu part
+  of the replay going another way (real time), or a change to what the game allocates.
 - Open: crash seen twice in 10 runs (0x46fc88 path object; diagnostic hook logs it); the
   menu part of a replay runs in real time (an early Enter may miss the intro skip); kit
   changes below not yet in recomp_kit.
 
 The way through: recomp_kit's docs/GUIDE.md. Tick off what is done, note what was learned.
-Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
+Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to 800729a
+2026-11-26 (three-way merge per file, no conflicts: settings menu, setup from cabinets, ...).
 
 ## 1. Start
 
@@ -58,10 +62,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 ## 4. Port
 
 - [ ] setup from the CD image: the game is in an InstallShield cab (`Motor/disk1/data1.cab`):
-  setup must take motor.exe and the Data group from it (by hand so far: `rtools iso
-  --extract`, `rtools iscab --extract`, then Data\* and motor.exe into game_files/Motorhead,
-  Movies into game_files/Movies)
-- [ ] high resolution, widescreen, settings
+  `cab_left_out: Some(&["Spawned"])` set (2026-11-26, the kit's setup installs from cabinets;
+  groups: Program Executable Files, Data, Spawned = motorm.exe). Not tried yet: a setup run
+  from the .bin/.cue into an empty folder; the movies stay on the CD (movies.pak)
+- [ ] high resolution, widescreen, settings (the kit's F10 menu: page Display with fullscreen,
+  resolution, anti-aliasing, textures, frame rate; not tried in the game yet)
 - [ ] gamepad
 - [ ] release (tag `v*`)
 

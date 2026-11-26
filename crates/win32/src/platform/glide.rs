@@ -231,6 +231,9 @@ struct Glide {
     /// the vertices' coordinate space
     space: (u32, u32),
     view: View,
+    /// the rows (screen pixels from the top, from..to) the triangles that follow are cut to,
+    /// besides the clip window (`set_rows`)
+    rows: Option<(i32, i32)>,
     /// the texture shown (drawn into through each thread's framebuffer, `Local`)
     color: glow::Texture,
     /// with MSAA: the multisampled renderbuffer drawn into, its samples and its number (a
@@ -1056,6 +1059,7 @@ impl Glide {
                 target,
                 space: (w, h),
                 view: View::Full,
+                rows: None,
                 color,
                 ms: None,
                 made: 0,
@@ -1385,7 +1389,12 @@ impl Glide {
         let vao = self.local(gl).vao;
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
-            self.scissor(gl, s.clip);
+            let mut clip = s.clip;
+            if let Some((r0, r1)) = self.rows {
+                clip[1] = clip[1].max(r0);
+                clip[3] = clip[3].min(r1);
+            }
+            self.scissor(gl, clip);
             gl.use_program(Some(self.prog));
             gl.bind_vertex_array(Some(vao));
             let u = &self.uniforms;
@@ -2719,6 +2728,19 @@ pub fn frame_scale() -> f32 {
 /// The aspect of the frame being drawn (4/3 while Glide is closed).
 pub fn frame_aspect() -> f32 {
     with(|g, _| g.target.0 as f32 / g.target.1.max(1) as f32).unwrap_or(4.0 / 3.0)
+}
+
+/// The rows (screen pixels from the top, from..to) the triangles that follow are cut to,
+/// besides the clip window; `None`: the clip window's only. A game that cuts its 3D to a view
+/// itself but lets some of it out (Recoil's particles: tested at their centre only) is kept in
+/// it; the clears and images are not cut.
+pub fn set_rows(rows: Option<(i32, i32)>) {
+    with(|g, gl| {
+        if rows != g.rows {
+            g.flush(gl);
+            g.rows = rows;
+        }
+    });
 }
 
 /// Where the vertices that follow go in the frame.

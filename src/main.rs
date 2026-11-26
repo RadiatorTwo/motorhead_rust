@@ -15,6 +15,7 @@ mod sprites;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;
+use win32::platform::options;
 use win32::{Game, Identity};
 
 /// The versions of the game's EXE this port knows; the first is the reference version: every
@@ -48,6 +49,9 @@ static ID: Identity = Identity {
     game_files: &[],
     // the movies stay on the CD (movies\movies.pak)
     video_marker: None,
+    // the game is on the CD only in Motor\disk1\data1.cab: installed from it, all but the
+    // Mplayer version (group Spawned: motorm.exe)
+    cab_left_out: Some(&["Spawned"]),
     // network discovery (DirectPlay over UDP): 8 bytes of the game's own, question and answer
     net_magic: (b"MOTORHD?", b"MOTORHD!"),
     log_file: "motorhead.log",
@@ -88,6 +92,20 @@ impl Game for MyGame {
 
     fn glide(&self) -> Option<&'static dyn win32::GlideExt> {
         Some(&frames::FRAMES)
+    }
+
+    fn options(&self) -> Vec<options::Page> {
+        // the port's settings menu (F10); widescreen once there is one (GUIDE 8c)
+        vec![options::Page {
+            title: "Display",
+            rows: vec![
+                options::fullscreen(),
+                options::window_size(),
+                options::anti_aliasing(),
+                options::textures(),
+                options::frame_rate_display(),
+            ],
+        }]
     }
 
     fn on_start(&self) {
