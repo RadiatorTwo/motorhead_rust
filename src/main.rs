@@ -14,6 +14,7 @@ mod loaded;
 mod sprites;
 mod wide;
 mod blur;
+mod pad;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;
@@ -82,6 +83,10 @@ impl Game for MyGame {
         // every hooked function is one (0x41009a is called only through a pointer)
         seeds.extend(hooks::all().into_iter().map(|(a, _)| (a, format!("hook_{a:x}"))));
         recomp::discover::find_functions(&mut code, &seeds)
+    }
+
+    fn pad_buttons(&self, _n: u32, buttons: u32) -> u32 {
+        pad::buttons(buttons)
     }
 
     fn smc(&self) -> SmcSpec {

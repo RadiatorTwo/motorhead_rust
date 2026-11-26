@@ -40,8 +40,8 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [x] the game opens its window
 - [x] intro videos (Smacker) play (`MOTORHEAD_SHOT`)
 - [x] the main menu shows (2026-11-25)
-- [ ] the menu answers to mouse and keys (`MOTORHEAD_INPUT`); Escape works
-- [ ] first-start config: which renderer the game picks (want Glide), its graphics menu
+- [x] the menu answers to mouse and keys (`MOTORHEAD_INPUT`); Escape works
+- [x] first-start config: which renderer the game picks (want Glide), its graphics menu
 
 ## 3. Playing
 
@@ -61,9 +61,9 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   it ([0x4da8e8] = 0) 0x43ac19 and two more add rand()*80 to the track's path pointer
   [0x79eebc]. The value is seeded now (`registry_seed`, 2026-11-26). To check: a race played
   to the finish (rec4's replay cannot: recorded with the protection failed).
-- [ ] sound effects (DirectSound), CD music (cue: tracks start), video sound: waveOut plays
+- [x] sound effects (DirectSound), CD music (cue: tracks start), video sound: waveOut plays
   into the mixer's stream (`waveout.rs`, 2026-11-26: Smacker opens 44100 Hz stereo 16 bit,
-  CALLBACK_NULL, writes 11264 frames at a time and polls WHDR_DONE). To hear: the intro.
+  CALLBACK_NULL, writes 11264 frames at a time and polls WHDR_DONE); the user heard it.
 - [x] saving and loading (league, records)
   2026-11-26: after a race the game writes HiScores\<track>.CL, <track>01.CR, *.MHI; the
   folder HiScores is not in the cab, and `inside_game` refused writes into a missing folder
@@ -90,9 +90,15 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   too, so the 3D came out lower by k (looked stretched sideways); now drawn 1/k times the
   frame's height around the middle (`View::Tall`). Checked rec7 960x720 against 1280x720: the
   car's proportions and the horizon the same.
-- [ ] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
-  resolution, anti-aliasing, textures, frame rate; not tried in the game yet)
-- [ ] gamepad
+- [x] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
+  resolution, anti-aliasing, textures, frame rate): the user checked it with widescreen
+  (2026-11-26)
+- [ ] gamepad (2026-11-26, `pad.rs`): in a race the pad presses the Keyboard layout's keys
+  once per logic frame (RT gas, LT brake, stick/D-pad steer, RB/LB gears, A handbrake, B horn,
+  Y rear view, X camera), whatever layout is chosen; in the menus A confirms, B is the second
+  button (the game confirms with the first: was RT). Kit: `Game::pad_buttons` (new). Tested
+  with the scripted pad (RT, LX); the user's real pad still to try. Steering is digital
+  (keys); analog only with the game's Joystick layout (not checked).
 - [ ] release (tag `v*`)
 
 ## Kit (taken over into recomp_kit 358ec43, 2026-11-25)

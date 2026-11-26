@@ -610,13 +610,15 @@ fn axis_value(d: u32, axis: u32, p: &Pad) -> u32 {
 fn get_device_state(c: &mut Cpu) -> u32 {
     let (d, size, out) = (arg(c, 0), arg(c, 1), arg(c, 2));
     let m = mem();
-    let p = pad(m.rd32(d + 8));
+    let n = m.rd32(d + 8);
+    let p = pad(n);
+    let buttons = crate::game::game().pad_buttons(n, p.buttons);
     let mut s = [0u8; 0x50];
     s[0..4].copy_from_slice(&axis_value(d, 0, &p).to_le_bytes());
     s[4..8].copy_from_slice(&axis_value(d, 1, &p).to_le_bytes());
     s[0x20..0x30].fill(0xff);
     for b in 0..32 {
-        s[0x30 + b] = if p.buttons >> b & 1 != 0 { 0x80 } else { 0 };
+        s[0x30 + b] = if buttons >> b & 1 != 0 { 0x80 } else { 0 };
     }
     let n = (size as usize).min(s.len());
     m.slice(out, n).copy_from_slice(&s[..n]);

@@ -81,6 +81,13 @@ pub fn race_log_every() -> u64 {
     *N.get_or_init(|| recomp::config::env("RACE_LOG").map_or(0, |v| v.parse().unwrap_or(60)))
 }
 
+/// A race runs: its last logic frame less than 250 ms ago.
+pub fn in_race() -> bool {
+    LAST.lock()
+        .unwrap()
+        .is_some_and(|t| t.elapsed() < Duration::from_millis(250))
+}
+
 pub fn race_frame(c: &mut Cpu) {
     let new = LAST
         .lock()
@@ -104,6 +111,7 @@ pub fn race_frame(c: &mut Cpu) {
             dump(&format!("{path}.{f}"));
         }
     }
+    crate::pad::race_frame();
     let t0 = Instant::now();
     call_original(c, RACE_FRAME.at());
     if race_log() {
