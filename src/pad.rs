@@ -7,7 +7,7 @@
 //! A joystick axis gives a strength between 0 and 1 (steering and gas are analog), a key 1.
 //!
 //! - In a race the pad's controls answer for the tasks besides the layout's own: the left
-//!   stick (and the D-pad) steers, RT accelerates, LT brakes, all analog; RB/LB change gear,
+//!   stick (and the D-pad) steers (squared: the user found it twitchy linear), RT accelerates, LT brakes, all analog; RB/LB change gear,
 //!   A handbrake, B horn, Y rear view, X the camera.
 //! - In the menus the game takes the pad's first button (ours: RT) to confirm: there A is
 //!   reported as the first button and B as the second, the triggers as nothing.
@@ -54,7 +54,8 @@ const DEAD_ZONE: f32 = 0.12;
 /// How strongly the pad asks for task `t` now (0: not at all).
 fn strength(t: u32, p: &dinput::Pad) -> f32 {
     let b = |k: u32| (p.buttons() >> k & 1) as f32;
-    let stick = |s: f32| ((s - DEAD_ZONE) / (1.0 - DEAD_ZONE)).clamp(0.0, 1.0);
+    // squared: fine near the middle, full at the edge
+    let stick = |s: f32| ((s - DEAD_ZONE) / (1.0 - DEAD_ZONE)).clamp(0.0, 1.0).powi(2);
     match t {
         TURN_LEFT => stick(-p.stick[0]).max(b(DPAD_LEFT)),
         TURN_RIGHT => stick(p.stick[0]).max(b(DPAD_RIGHT)),
