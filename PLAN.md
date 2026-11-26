@@ -149,6 +149,13 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   the atlas rows above and below the road's rectangle (black, brown): flickering dark
   cross lines between the road pieces, only when looking along the road (2026-11-26).
 
+- `glide.rs`/`options.rs`: `SOFT_LIGHTS` (REG_DWORD `SoftLights`, default on), row "Soft lights"
+  on Motorhead's page Advanced: blend one, one (halos, lens flares, sparks) drawn as screen
+  (one, 1 - source colour). RedRock's start: seven cars in a row face the camera, ~14 halos on
+  one spot burnt out to a white blot (2026-11-26, rec8). Checked first and ruled out: blur,
+  60 vs 240 pictures, ZRead, MSAA, colour format (ARGB); the light test is right (each light
+  just in front of its car's body, all visible over the cars ahead).
+
 - `game.rs`/`glide.rs`: `GlideExt::constant_color(value, from)` (a game sees where a
   constant colour is set), `glide::keep_picture` / `restore_picture` (the colour of the
   picture drawn so far kept, and put back). Motorhead's motion blur draws the scene at alpha

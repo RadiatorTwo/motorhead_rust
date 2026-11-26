@@ -207,6 +207,14 @@ pub fn set_texture_lod(n: u32) {
     LOD.store(n, Ordering::Relaxed);
 }
 
+/// Soft lights (REG_DWORD `SoftLights`, default on): what a game adds to the picture (blend
+/// one, one: halos, lens flares, sparks) brightens only what is left up to white (screen
+/// blending, one, 1 - source colour). Added, many lights on one spot (Motorhead's start on
+/// RedRock: seven cars in a row facing the camera, about 14 halos) burn out to a white blot;
+/// screened, one light looks nearly the same and many stay apart.
+pub static SOFT_LIGHTS: super::setting::Setting =
+    super::setting::Setting::new("SoftLights", "SOFT_LIGHTS", true);
+
 /// Multisample anti-aliasing: samples per pixel (0 off).
 pub const MSAA_CHOICES: &[u32] = &[0, 2, 4, 8];
 static MSAA: AtomicU32 = AtomicU32::new(4);
@@ -1573,6 +1581,8 @@ impl Glide {
                 gl.enable(glow::BLEND);
                 if edge == 1 {
                     gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                } else if src == glow::ONE && dst == glow::ONE && SOFT_LIGHTS.get() {
+                    gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_COLOR);
                 } else {
                     gl.blend_func(src, dst);
                 }

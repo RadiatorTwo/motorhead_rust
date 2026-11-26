@@ -120,7 +120,7 @@ impl Game for MyGame {
             // optional improvements beyond the original's look
             options::Page {
                 title: "Advanced",
-                rows: vec![options::texture_lod()],
+                rows: vec![options::texture_lod(), options::soft_lights()],
             },
         ]
     }

@@ -162,6 +162,16 @@ pub fn texture_lod() -> Row {
     )
 }
 
+/// Added lights screened instead of summed (`glide::SOFT_LIGHTS`).
+pub fn soft_lights() -> Row {
+    Row::on_off(
+        "Soft lights",
+        "Many lights on one spot do not burn out to white",
+        || glide::SOFT_LIGHTS.get(),
+        |on| glide::SOFT_LIGHTS.set(on),
+    )
+}
+
 pub fn frame_rate_display() -> Row {
     Row::on_off(
         "Frame rate display",
