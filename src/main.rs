@@ -47,8 +47,9 @@ static ID: Identity = Identity {
     required: &["Data", "Cars", "Tracks", "Game", "Sounds", "League", "SMACKW32.DLL"],
     // other files kept in the game folder (saves, the game's own settings)
     game_files: &[],
-    // the movies stay on the CD (movies\movies.pak)
-    video_marker: None,
+    // the intro and race videos (the game reads D:\Movies\movies.pak): setup copies the CD's
+    // Movies folder into game_files
+    video_marker: Some("movies.pak"),
     // the game is on the CD only in Motor\disk1\data1.cab: installed from it, all but the
     // Mplayer version (group Spawned: motorm.exe)
     cab_left_out: Some(&["Spawned"]),

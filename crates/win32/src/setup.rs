@@ -7,7 +7,8 @@
 //! ```text
 //! game_files/FCopLAPD/   FCopLAPD.exe, febmp.bin, missions/ (`Identity::required`), and
 //!                        registry.txt, controls.txt, save.cfg... (`Identity::game_files`)
-//! game_files/Video/      the videos (optional; the folder with `Identity::video_marker`)
+//! game_files/Video/      the videos (optional; the folder with `Identity::video_marker`, under
+//!                        its name on the CD: Motorhead's Movies)
 //! game_files/Textures/   replacement textures (optional, `platform::hd`)
 //! ```
 //!
@@ -21,7 +22,24 @@ use std::path::{Path, PathBuf};
 
 use crate::game::id;
 
-const VIDEO: &str = "Video";
+/// The videos' folder in `root`: a folder beside the game folder holding the marker (it keeps
+/// its name on the CD, where the game looks for it: "D:\Movies\movies.pak"). None: not
+/// there yet, or the game has no videos.
+fn videos(root: &Path) -> Option<PathBuf> {
+    let marker = id().video_marker?;
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .filter(|d| {
+            let name = d.file_name().unwrap_or_default().to_string_lossy();
+            !name.eq_ignore_ascii_case(folder()) && !name.ends_with(".part")
+        })
+        .collect();
+    dirs.sort();
+    dirs.into_iter().find(|d| find(d, marker, 0).is_some())
+}
 /// The game folder's name in `game_files`.
 fn folder() -> &'static str {
     id().folder
@@ -111,14 +129,16 @@ pub fn game_exe(root: &Path) -> Result<PathBuf, String> {
             from.display()
         ));
     }
-    let video = root.join(VIDEO);
-    if !video.is_dir() {
+    if videos(root).is_none() {
         match id()
             .video_marker
             .and_then(|m| find(root, m, 6))
             .and_then(|p| p.parent().map(Path::to_path_buf))
         {
-            Some(v) if !same(&v, &game) => move_into(&v, &video)?,
+            Some(v) if !same(&v, &game) && !same(&v, root) => {
+                let name = v.file_name().unwrap_or_default().to_os_string();
+                move_into(&v, &root.join(name))?
+            }
             _ if id().video_marker.is_some() => {
                 eprintln!("setup: the game's videos were not found; the game runs without them")
             }
@@ -126,7 +146,9 @@ pub fn game_exe(root: &Path) -> Result<PathBuf, String> {
         }
     }
     writable(&game);
-    writable(&video);
+    if let Some(video) = videos(root) {
+        writable(&video);
+    }
     // Nothing is ever removed: the folder holds the player's files (the CD image, a copied game).
     // An earlier cleanup ("what the game does not need") put a game's files and its CD image
     // into the recycle bin when the game's own files were not all listed in `Identity`.
@@ -230,9 +252,11 @@ fn from_image(path: &Path, root: &Path) -> Result<(), String> {
         "setup: taking the game from the CD image {}",
         path.display()
     );
-    let video = root.join(VIDEO);
-    if !video.is_dir() {
+    if videos(root).is_none() {
         if let Some((v, _)) = id().video_marker.and_then(|m| iso.find(&top, m, 6)) {
+            // under its name on the CD (the CD's top folder itself: "Video")
+            let name = if v.name.is_empty() { "Video".to_string() } else { v.name.clone() };
+            let video = root.join(&name);
             let total = iso.size(&v).map_err(fail)?.max(1);
             iso.copied = 0;
             iso.progress = Some(Box::new(move |n| {
@@ -242,7 +266,7 @@ fn from_image(path: &Path, root: &Path) -> Result<(), String> {
                 ))
             }));
             // under another name until it is whole: an interrupted start copies it again
-            let part = root.join("Video.part");
+            let part = root.join(format!("{name}.part"));
             let _ = std::fs::remove_dir_all(&part);
             iso.extract(&v, &part).map_err(fail)?;
             std::fs::rename(&part, &video).map_err(fail)?;

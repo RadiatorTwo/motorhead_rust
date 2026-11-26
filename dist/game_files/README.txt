@@ -6,8 +6,12 @@ installed game folder.
 At its next start motorhead finds the game, checks that it is a version
 this port knows, and sets it up here:
 
-  GAMEFOLDER\   the game's EXE and data (and your settings and saved games)
-  Video\        the videos, if the game has any on its CD
+  Motorhead\    the game, installed from the CD's installer (and your settings
+                and saved games)
+  Movies\       the videos
+
+Keep the CD image (.bin with its .cue) here: the music is played from its
+audio tracks.
 
 From a CD image these are taken out; the image stays where it is.
 Nothing in this folder is ever deleted: remove the image or other

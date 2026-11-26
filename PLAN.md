@@ -61,10 +61,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 
 ## 4. Port
 
-- [ ] setup from the CD image: the game is in an InstallShield cab (`Motor/disk1/data1.cab`):
-  `cab_left_out: Some(&["Spawned"])` set (2026-11-26, the kit's setup installs from cabinets;
-  groups: Program Executable Files, Data, Spawned = motorm.exe). Not tried yet: a setup run
-  from the .bin/.cue into an empty folder; the movies stay on the CD (movies.pak)
+- [x] setup from the CD image (2026-11-26): the game is in an InstallShield cab
+  (`Motor/disk1/data1.cab`), installed by the kit's setup (`cab_left_out: Some(&["Spawned"])`:
+  groups Program Executable Files, Data; Spawned = motorm.exe left out), the CD's Movies folder
+  copied (`video_marker: movies.pak`). Tried: .bin + .cue alone in an empty game_files: 1208
+  files, the same as installed by hand; demos and CD music ran. The image stays (CD audio).
 - [ ] high resolution, widescreen, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate; not tried in the game yet)
 - [ ] gamepad
@@ -109,6 +110,8 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 
 ## Kit (not yet taken over)
 
+- `setup.rs` `videos`: the videos' folder keeps its name on the CD (Motorhead reads
+  `D:\Movies\movies.pak`; was always `game_files/Video`). Other games' CDs call it Video.
 - `tween.rs` `Statics`: a buffer per range (an image with a gap between its parts needs one
   `Statics` per part: Motorhead's DGROUP and .bss; reading the gap crashed).
 - `sample.rs`: `SAMPLE_RAW` writes a file per 2 s (`<path>.<n>`), not only the last.
