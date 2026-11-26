@@ -22,3 +22,5 @@
 0x7499a9 player_car  the car object of player i at [0x7499a9 + i * 0x2c00] (8 players)
 0x747e28 player_viewed  the player the camera follows
 0x77d95c renderer  [+0x298]: its function table (Glide's at 0x505eb0: +0x28 the buffer swap)
+0x4be458 Glide_LightsVisible  locks the depth buffer (grLfbLock AUXBUFFER, read) and sets each light's [+0x40] = depth there < its z ([+0x44] x, [+0x48] y, [+0x4c] z, next [+0x50]): halos and lens flares drawn or not
+0x80bbfc glide_grLfbLock  pointer from GetProcAddress (the Glide pointers are at 0x80bb8c..0x80bc10)

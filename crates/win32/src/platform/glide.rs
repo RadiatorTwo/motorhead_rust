@@ -319,8 +319,9 @@ struct Local {
     empty: glow::VertexArray,
     fbos: HashMap<(bool, u64), glow::Framebuffer>,
     copy: [glow::Framebuffer; 2],
-    /// the picture at the Glide screen's size, for reading it back (`read_screen`)
-    read: Option<(glow::Framebuffer, glow::Renderbuffer, (u32, u32))>,
+    /// the picture and its depth at the Glide screen's size, for reading them back
+    /// (`read_screen`, `read_depth`)
+    read: Option<(glow::Framebuffer, [glow::Renderbuffer; 2], (u32, u32))>,
 }
 
 impl Local {
@@ -350,9 +351,11 @@ impl Local {
             for f in self.fbos.into_values().chain(self.copy) {
                 gl.delete_framebuffer(f);
             }
-            if let Some((f, rb, _)) = self.read {
+            if let Some((f, rbs, _)) = self.read {
                 gl.delete_framebuffer(f);
-                gl.delete_renderbuffer(rb);
+                for rb in rbs {
+                    gl.delete_renderbuffer(rb);
+                }
             }
         }
     }
@@ -1154,24 +1157,28 @@ impl Glide {
             }
         }
         unsafe {
-            if let Some((f, rb, _)) = l.read.take() {
+            if let Some((f, rbs, _)) = l.read.take() {
                 gl.delete_framebuffer(f);
-                gl.delete_renderbuffer(rb);
+                for rb in rbs {
+                    gl.delete_renderbuffer(rb);
+                }
             }
-            let rb = gl.create_renderbuffer().expect("GL renderbuffer");
-            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(rb));
-            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, size.0 as i32, size.1 as i32);
-            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
             let f = gl.create_framebuffer().expect("GL framebuffer");
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(f));
-            gl.framebuffer_renderbuffer(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::RENDERBUFFER,
-                Some(rb),
-            );
+            let rbs = [
+                (glow::RGBA8, glow::COLOR_ATTACHMENT0),
+                (glow::DEPTH_COMPONENT32F, glow::DEPTH_ATTACHMENT),
+            ]
+            .map(|(format, attachment)| {
+                let rb = gl.create_renderbuffer().expect("GL renderbuffer");
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(rb));
+                gl.renderbuffer_storage(glow::RENDERBUFFER, format, size.0 as i32, size.1 as i32);
+                gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, attachment, glow::RENDERBUFFER, Some(rb));
+                rb
+            });
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            l.read = Some((f, rb, size));
+            l.read = Some((f, rbs, size));
             f
         }
     }
@@ -1702,6 +1709,70 @@ impl Glide {
         [p(a, -h, -h), p(a, -h, h), p(b, h, -h), p(b, h, h)]
     }
 
+    /// The depth buffer so far at the Glide screen's size, rows from the top, as Glide keeps
+    /// it: z-buffer values (ooz, 0..0xffff, larger nearer). Motorhead reads it to see whether
+    /// a light is hidden (its halo and lens flare drawn or not).
+    fn read_depth(&mut self, gl: &glow::Context) -> Vec<u16> {
+        self.flush(gl);
+        let (tw, th) = (self.target.0 as i32, self.target.1 as i32);
+        let src = self.color_fbo(gl);
+        let ([vx, vy, vw, vh], _) = self.view_rect();
+        let (w, h) = self.res;
+        let ms = self.ms_fbo(gl);
+        let dst = self.read_fbo(gl);
+        let mut raw = vec![0u8; (w * h * 4) as usize];
+        unsafe {
+            gl.disable(glow::SCISSOR_TEST);
+            // multisampled: its depth into the target's own first (a resolve keeps the size)
+            if let Some(ms) = ms {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(ms));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(src));
+                gl.blit_framebuffer(0, 0, tw, th, 0, 0, tw, th, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
+            }
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(src));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(dst));
+            // (GL rows from the bottom)
+            gl.blit_framebuffer(
+                vx.round() as i32,
+                (th as f32 - vy - vh).round() as i32,
+                (vx + vw).round() as i32,
+                (th as f32 - vy).round() as i32,
+                0,
+                0,
+                w as i32,
+                h as i32,
+                glow::DEPTH_BUFFER_BIT,
+                glow::NEAREST,
+            );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(dst));
+            gl.read_pixels(
+                0,
+                0,
+                w as i32,
+                h as i32,
+                glow::DEPTH_COMPONENT,
+                glow::FLOAT,
+                glow::PixelPackData::Slice(Some(&mut raw)),
+            );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+        let d: Vec<f32> = raw
+            .chunks_exact(4)
+            .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let w_buffer = matches!(self.state.depth_mode, 2 | 4);
+        let mut out = Vec::with_capacity((w * h) as usize);
+        for y in 0..h {
+            out.extend(d[((h - 1 - y) * w) as usize..][..w as usize].iter().map(|&v| {
+                // z as drawn (ooz / 65535); w turned round as `buffer_clear` does (an
+                // approximation: Glide keeps w as a 4.12 float)
+                let v = if w_buffer { 1.0 - v } else { v };
+                (v.clamp(0.0, 1.0) * 65535.0).round() as u16
+            }));
+        }
+        out
+    }
+
     /// The picture so far at the Glide screen's size, rows from the top, as 0xRRGGBB.
     fn read_screen(&mut self, gl: &glow::Context) -> Vec<u32> {
         self.flush(gl);
@@ -1834,7 +1905,16 @@ impl Glide {
 
     /// grLfbLock: the guest buffer of the Glide screen (read: the picture so far; write:
     /// `LFB_UNTOUCHED`, drawn where changed at grLfbUnlock).
-    fn lfb_lock(&mut self, gl: &glow::Context, write: bool, mode: u32, lower: bool) -> u32 {
+    /// `buffer`: GR_BUFFER_FRONTBUFFER 0, BACKBUFFER 1 (the picture), AUXBUFFER 2 (depth;
+    /// read only).
+    fn lfb_lock(
+        &mut self,
+        gl: &glow::Context,
+        write: bool,
+        buffer: u32,
+        mode: u32,
+        lower: bool,
+    ) -> u32 {
         static BUF: AtomicU32 = AtomicU32::new(0);
         let (w, h) = self.res;
         let mut buf = BUF.load(Ordering::Relaxed);
@@ -1849,6 +1929,14 @@ impl Glide {
             for y in 0..h {
                 for p in m.slice(buf + y * LFB_STRIDE, 2 * w as usize).chunks_exact_mut(2) {
                     p.copy_from_slice(&untouched);
+                }
+            }
+        } else if buffer == 2 {
+            let z = self.read_depth(gl);
+            for y in 0..h {
+                let row = if lower { h - 1 - y } else { y };
+                for x in 0..w {
+                    m.wr16(buf + row * LFB_STRIDE + 2 * x, z[(y * w + x) as usize]);
                 }
             }
         } else {
@@ -2447,14 +2535,17 @@ fn glide_set_state(c: &mut Cpu) -> u32 {
 /// grLfbLock(type, buffer, write mode, origin, pixel pipeline, GrLfbInfo*): type bit 0 is
 /// write. GrLfbInfo: size, pointer, stride, write mode, origin.
 fn lfb_lock(c: &mut Cpu) -> u32 {
-    let (ty, mode, origin, info) = (arg(c, 0), arg(c, 2), arg(c, 3), arg(c, 5));
+    let (ty, buffer, mode, origin, info) = (arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 5));
     let write = ty & 1 != 0;
+    if write && buffer == 2 {
+        log!("warn: grLfbLock: writing the depth buffer not supported");
+    }
     let mode = if mode == 0xff { 0 } else { mode };
     if write && mode > 2 {
         log!("warn: grLfbLock write mode {mode:#x} not supported");
     }
     let lower = origin == 1;
-    let Some(buf) = with(|g, gl| g.lfb_lock(gl, write, mode, lower)) else {
+    let Some(buf) = with(|g, gl| g.lfb_lock(gl, write, buffer, mode, lower)) else {
         return 0;
     };
     let m = mem();
@@ -2677,6 +2768,7 @@ fn clip_window(c: &mut Cpu) -> u32 {
     });
     0
 }
+
 
 fn combine(c: &Cpu) -> [u32; 5] {
     [arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4)]

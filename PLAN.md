@@ -88,6 +88,11 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25.
 
 ## Kit (not yet taken over)
 
+- `glide.rs` `read_depth`: grLfbLock of the depth buffer (AUXBUFFER, read) gives the z values
+  (ooz) at the screen's size; was the picture's colours. Motorhead tests each light's
+  visibility with it (0x4be458): halos and lens flares were seldom seen and flickered
+  (2026-11-26, the user saw them all, steady).
+
 - `glide.rs`: palette textures (P_8, AP_88) through grTexDownloadTable(/Partial), converted
   again when drawn with another palette than they were converted with (`palette_hash`: by
   content, not a count of changes; Motorhead switches palettes and had every texture
