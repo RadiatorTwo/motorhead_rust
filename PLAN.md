@@ -1,6 +1,113 @@
 # PLAN — Motorhead
 
-## Now (2026-11-26, end of session)
+## Now (2026-11-27): frame rate (issue #1)
+
+- Pacing: with vsync the swap paces (interval = refreshes a picture), our clock only for a
+  limit that is no whole number of refreshes or without vsync; the rate is the window's
+  display (winit, kept by the window's thread), not the compositor's (it said 240 Hz for a
+  display at 60). Was: our pace on the compositor's refreshes beside the swap, pictures of
+  33 ms now and then at 60 Hz. To check: the user's 60 Hz display and the laptop with vsync.
+- `glide.rs` `read_back`: grLfbLock reads straight into guest memory (the GPU scales, turns
+  and converts; was pixel by pixel here, ~30% of a race); the depth buffer (0x4be458, every
+  picture) a picture late through two pixel buffers, read as floats (as 16-bit the driver
+  waited all the same): GPU wait 18-26% -> 3%. rec8 on the 5800X3D: race start 112 -> 177
+  fps, later ~140 -> 210-280. The laptop (Iris Xe, v0.3.2) had 30 fps with vsync, "the game
+  and drawing" 25 ms of 33: the depth read waiting behind the swap. To check: halos and lens
+  flares still right (a picture late).
+- Lights (0x4be458, `hooks.rs` `lights_visible`): in Rust, the depth read at the lights'
+  points only (`glide::depth_at`, the same picture-late read); converting the whole screen
+  each picture was ~10%. Beside the screen a light is hidden (the game read beside the
+  buffer). To check: halos and lens flares.
+- Lifter (`lift/x87.rs` `floats`): 24 bits to nearest (0x07f, the renderer sets it at
+  0x414ca4) with operands that are floats' values: the double result rounded to a float
+  (exact: 53 >= 2*24+2), if a float's normal number; else the general way (~60 instructions
+  an operation). Test `x87_floats_to_nearest`. It found a fault in `rt_fpu_round`: a tie
+  beyond a float's range went by `lo as f32` (infinity, "even"); now by the 24-bit number's
+  own last bit (`even24`).
+- rec8 on the 5800X3D, all together: race start 112 -> 235 fps, later ~140 -> 280-355.
+- The frame rate follows what the game draws, no cache: rec8 counted 4730 points a picture
+  (0x414e54 calls) at the start (240 fps), 524 at the end (1000 fps); the whole field in
+  view (the start, looking back) is the worst case. Issue #1's 18 fps is probably there.
+- Measured with: `MOTORHEAD_SAMPLE=1` (or `=insn`), `MOTORHEAD_VSYNC=0`,
+  `MOTORHEAD_INPUT=@rec8.txt`, run from the project folder (`cargo run` there; the exe in
+  target\release finds no game files from its own folder). Our own code shows as
+  `motorhead.exe+0x...`: resolved with dbghelp (SymFromAddrW) on target\release\motorhead.pdb
+  (PowerShell Add-Type, module loaded at a base of choice, base + offset). `MOTORHEAD_DUMP=hex`
+  shows a function's machine code (0x414e54 was 32 KB before the x87 change).
+- The laptop (i5-1145G7, Iris Xe) with this state: vsync 60 fps (was 30). Fullscreen stays at
+  60 with vsync off too (borderless through the compositor: GL cannot go faster than the
+  display there; not a fault). Window at 1920x1080 ~80 fps (GPU bound there).
+- Not committed yet (all of the above). Open for the user: commit and a release for the
+  reporter (ask him for motorhead.log, it now names both refresh rates); the x87 change
+  and `even24` also into recomp_kit (asked, no answer yet).
+- 0x414e54 (Project_Point) in Rust (`src/project.rs`): the same operations in the same
+  order on doubles, each rounded to a float (the FPU at 24 bits while the result is a float's
+  normal number; else, or another control word, the game's code runs). x87 registers and TOP
+  left as the game leaves them (the behind case ends with ffree: two slots stay pushed).
+  `MOTORHEAD_CHECK_PROJECT=1` runs both and compares registers, x87 registers, [eax], [ecx]:
+  rec8 95 million calls, 0 differ, 0 by the game's code. rec8 with vsync off, same build
+  without/with: 285-316 -> 305-399 fps early, ~980 -> ~1050 later (~5-10%).
+- 0x456d4c (Render_Polygons, 1820 instructions, 7 callees): ~20% of a race, its lifted code
+  254 KB (x30). By instruction (`MOTORHEAD_SAMPLE=insn`) the time is in five per-vertex loops
+  (0x456ea7-0x457035 the biggest: cache check, 0x414e54, copy to the vertex buffer
+  [0x521220], z compare; 0x45783c, 0x457f83-0x457fe7, 0x45847e-0x45861e, 0x458921). The
+  machine code (`MOTORHEAD_DUMP=456d4c`) showed the lifter's x87 under 0x07f: a plain
+  `fld dword; fstp dword` was ~150 instructions (the control word read and its mode worked
+  out again after each branch; a store always went the general rounding way). Lifter changes
+  (also for recomp_kit): a float loaded and stored again is stored as it is (`promoted`); a
+  store of a float's value needs no rounding (`is_float`); straight runs get a version for
+  0x07f (`Lifter::near24`, beside 0xc7f's and the usual one: no mode per operation, `floats`
+  first). Test `x87_store_floats`. rec8: early 311-365 -> 335-415 fps, 0x456d4c 21.8% ->
+  20.3%. Still to do there: the loops' x87 between branches (each loop head settles the
+  cache and works out the mode again), or 0x456d4c in Rust (a session or more).
+- Lifter: the x87 cache goes over jumps (`x87_edge`, `x87_join` in lift/x87.rs): a join
+  gets ST(0..7) and the control word in Cranelift variables, as its first lifted jump had
+  them (ST(i) relative to TOP: the same on every way); the others give the same, memory gets
+  what the join does not carry. Was: everything written back before every jump, loaded
+  again after it (a loop's values went through memory each pass, the control word read and
+  its mode worked out again). `MOTORHEAD_NO_CARRY87=1` as before. Found on the way: an
+  instruction falling through to one that is not the next in the list (Watcom's
+  `test ax, imm` hiding a `mov`, 0x4c8f33) is a join now; `fcw` read in a side block was kept
+  in the cache (arith_rz); a version's loads at its end stayed in the cache for the next
+  version. Tests `x87_carry` (the game's loops, the overlap), `x87_cache` (a branch over
+  arithmetic, 1000 programs, NaNs compared as NaNs). The game now says which functions
+  Cranelift refused ("not compiled": they stop with "not supported yet" when called).
+  rec8: 0x456d4c 20.3% -> 18.4%, the GPU wait's share 11% -> 16%.
+- Traps found: switches such as `NO_CARRY87`, `NO_NEAR24` are not in the compiled code's
+  key: delete `game_files/Motorhead/compiled.bin` between A/B runs (else the second loads
+  the first's code). rec8's savestate is never loaded ("not loaded: this mission started
+  otherwise (heap blocks)"), so the race follows the menu part's real-time input: race logs
+  of two runs differ (also with the same code) and a run sometimes ends in the menu
+  (ExitProcess after writing MotorHead.CFG); no bit-exact check of the game possible with it.
+- 0x456d4c in Rust (`src/polygons.rs`, started 2026-11-28), piece by piece: a face (eax:
+  [+0] [+1] flags, [+8] its points' indices (u16), [+0xc] its normals' indices, [+0x10]
+  colour bytes, [+0x14] texture, [+0x18] uvs) of an object (edx: [+0x34] matrix, [+0x8c]
+  points (12 bytes), [+0x94] normals, [+0xa8], [+0x64..] camera, [+0xe4]); ebx, ecx (shading
+  mode, [esp+108]). Caches: 0x5e12b4 projected points (16 bytes, [+0] = -1 empty),
+  0x6e12b4 their clip flags, 0x5212b4 light per normal (12 bytes; filled by 0x455fb8 or
+  0x455e40). Output: the polygon at [0x521220] (0xc0 bytes: flags, points of 0x20 at +4,
+  colours of 12 at +0x84, texture +0xb4, next +0xbc), put in the list [0x521224] and
+  [0x521220] += 0xc0; 0x4566b8 clips at the near plane (points flagged 0x10). Callees:
+  0x441d0c clamps a colour (stdcall, lo/hi), 0x441dc8, 0x4c17d6 trunc. Everything before
+  the polygon is put in its list is done again the same by the game's code (caches filled,
+  the polygon's record overwritten): the Rust code does what it has, and calls the game's
+  function for ways not yet done. The x87 arithmetic as the lifter does it (`floats` or
+  `rt_fpu_round`). Check: `MOTORHEAD_CHECK_POLYGONS=n` every n-th call both ways on a
+  memory copy (`MemoryCopy`), compared but the stack below esp.
+  Done (2026-11-28, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8: 1024 checks, 0 differ): the
+  points (0x456d4c..0x45703b, both early ends), colour mode 1 close (0x457617, fog
+  0x457832, texture 0x4585b7, 0x458909), far (0x4574d2..0x45802b, any mode), colour mode 4
+  close without [+1] flags 1 and 0x10 (0x457bc4, light 0x455e40 called as the game's).
+  0x441d0c (clamp) and 0x4c17d6 (trunc) in Rust. Ways on rec8: behind 196k, outside 97k,
+  mode 1 454k, far 332k, mode 4 443k, the game's 525k (465k of it mode 4 with [+1] flag 1:
+  0x458092 / 0x45839e with 0x441dc8; mode 2 48k; cut at the near plane 12k). 0x456d4c
+  18.4% -> 8.9% of a race. `src/fpu.rs`: the lifter's x87 rounding for Rust code.
+  Next: mode 4 with [+1] flag 1 (0x45839e, [0x739f2c] != 1), then mode 2 (0x45778e), the
+  near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
+  memory copy each): fine for a check, the window looks hung.
+- Then the depth read's remaining ~5% wait.
+
+## Before (2026-11-26, end of session)
 
 - Pictures between logic frames work: ~220–240 fps on the user's 480 Hz display (limit 240),
   cars and camera interpolated, the race log of rec3 unchanged. The user saw no problems

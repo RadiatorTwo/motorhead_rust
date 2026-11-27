@@ -360,6 +360,18 @@ struct Local {
     /// the picture and its depth at the Glide screen's size, for reading them back
     /// (`read_screen`, `read_depth`)
     read: Option<(glow::Framebuffer, [glow::Renderbuffer; 2], (u32, u32))>,
+    /// the depth buffer's reads into pixel buffers, taking turns (`read_back`)
+    depth_reads: [Option<DepthRead>; 2],
+    /// the slot read into last
+    depth_last: Option<usize>,
+}
+
+/// A read of the depth buffer into a pixel buffer: its size and origin (bottom row first), and
+/// the fence after it until it was waited for.
+struct DepthRead {
+    pbo: glow::Buffer,
+    key: (u32, u32, bool),
+    fence: Option<glow::Fence>,
 }
 
 impl Local {
@@ -377,6 +389,8 @@ impl Local {
                 fbos: HashMap::new(),
                 copy: [fbo(), fbo()],
                 read: None,
+                depth_reads: [None, None],
+                depth_last: None,
             }
         }
     }
@@ -388,6 +402,12 @@ impl Local {
             gl.delete_vertex_array(self.empty);
             for f in self.fbos.into_values().chain(self.copy) {
                 gl.delete_framebuffer(f);
+            }
+            for r in self.depth_reads.into_iter().flatten() {
+                gl.delete_buffer(r.pbo);
+                if let Some(f) = r.fence {
+                    gl.delete_sync(f);
+                }
             }
             if let Some((f, rbs, _)) = self.read {
                 gl.delete_framebuffer(f);
@@ -922,6 +942,14 @@ fn stage(t: &mut Texture, r0: u32, r1: u32, px: &[u8]) {
 /// Whether a texture format reads the palette.
 fn paletted(format: u32) -> bool {
     matches!(format, 5 | 0xe)
+}
+
+/// A depth buffer's value (0..1) as Glide's z-buffer keeps it (ooz / 65535, larger nearer);
+/// a w-buffer's turned round as `buffer_clear` does (an approximation: Glide keeps w as a
+/// 4.12 float). The cast saturates (below 0: 0, above 1: 0xffff).
+fn ooz(v: f32, w_buffer: bool) -> u16 {
+    let v = if w_buffer { 1.0 - v } else { v };
+    (v * 65535.0 + 0.5) as u16
 }
 
 /// 0xRRGGBB as a 565 pixel.
@@ -1815,42 +1843,133 @@ impl Glide {
         [p(a, -h, -h), p(a, -h, h), p(b, h, -h), p(b, h, h)]
     }
 
-    /// The depth buffer so far at the Glide screen's size, rows from the top, as Glide keeps
-    /// it: z-buffer values (ooz, 0..0xffff, larger nearer). Motorhead reads it to see whether
-    /// a light is hidden (its halo and lens flare drawn or not).
-    fn read_depth(&mut self, gl: &glow::Context) -> Vec<u16> {
+    /// The picture so far (`depth`: the depth buffer) at the Glide screen's size, straight
+    /// into guest memory at `buf` (rows `LFB_STRIDE` apart, the bottom row first if `lower`),
+    /// as Glide keeps it: 565 pixels, or z-buffer values (ooz, 0..0xffff, larger nearer).
+    /// The GPU brings it down to the screen's size, turns it the right way up and converts
+    /// the picture; here only the read. (Converted and written pixel by pixel here, it was
+    /// about a third of a race.)
+    fn read_back(&mut self, gl: &glow::Context, depth: bool, buf: u32, lower: bool) {
+        let (w, h) = self.res;
+        let out = mem().slice(buf, (LFB_STRIDE * h) as usize);
+        if depth {
+            let w_buffer = matches!(self.state.depth_mode, 2 | 4);
+            self.depth_late(gl, lower, |z| {
+                // a plain loop per row into u16, vectorised (a branch and byte copies per
+                // pixel were ~10% of a race)
+                let mut row = vec![0u16; w as usize];
+                for (y, line) in z.chunks_exact(w as usize).enumerate() {
+                    for (d, &v) in row.iter_mut().zip(line) {
+                        *d = ooz(v, w_buffer);
+                    }
+                    let at = y * LFB_STRIDE as usize;
+                    // SAFETY: the row's u16 as bytes (x86: little-endian, as the guest's)
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(row.as_ptr() as *const u8, 2 * row.len())
+                    };
+                    out[at..at + bytes.len()].copy_from_slice(bytes);
+                }
+            });
+            return;
+        }
+        self.to_read_fbo(gl, false, lower);
+        unsafe {
+            gl.pixel_store_i32(glow::PACK_ROW_LENGTH, (LFB_STRIDE / 2) as i32);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 2);
+            gl.read_pixels(
+                0,
+                0,
+                w as i32,
+                h as i32,
+                glow::RGB,
+                glow::UNSIGNED_SHORT_5_6_5,
+                glow::PixelPackData::Slice(Some(out)),
+            );
+            gl.pixel_store_i32(glow::PACK_ROW_LENGTH, 0);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 4);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+    }
+
+    /// The picture (with `depth`: its depth) so far brought down to the Glide screen's size
+    /// in this thread's read framebuffer, left bound; the bottom row first if `lower`, else
+    /// the top one.
+    fn to_read_fbo(&mut self, gl: &glow::Context, depth: bool, lower: bool) {
         self.flush(gl);
         let (tw, th) = (self.target.0 as i32, self.target.1 as i32);
-        let src = self.color_fbo(gl);
         let ([vx, vy, vw, vh], _) = self.view_rect();
         let (w, h) = self.res;
-        let ms = self.ms_fbo(gl);
+        if depth {
+            // multisampled: its depth into the target's own first (a resolve keeps the size)
+            if let Some(ms) = self.ms_fbo(gl) {
+                let src = self.color_fbo(gl);
+                unsafe {
+                    gl.disable(glow::SCISSOR_TEST);
+                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(ms));
+                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(src));
+                    gl.blit_framebuffer(0, 0, tw, th, 0, 0, tw, th, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
+                }
+            }
+        } else {
+            self.resolve(gl);
+        }
+        let src = self.color_fbo(gl);
         let dst = self.read_fbo(gl);
-        let mut raw = vec![0u8; (w * h * 4) as usize];
+        let bit = if depth {
+            glow::DEPTH_BUFFER_BIT
+        } else {
+            glow::COLOR_BUFFER_BIT
+        };
+        // GL's rows from the bottom: the guest's first row at the bottom, or turned over
+        let (y0, y1) = if lower { (0, h as i32) } else { (h as i32, 0) };
         unsafe {
             gl.disable(glow::SCISSOR_TEST);
-            // multisampled: its depth into the target's own first (a resolve keeps the size)
-            if let Some(ms) = ms {
-                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(ms));
-                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(src));
-                gl.blit_framebuffer(0, 0, tw, th, 0, 0, tw, th, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
-            }
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(src));
             gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(dst));
-            // (GL rows from the bottom)
             gl.blit_framebuffer(
                 vx.round() as i32,
                 (th as f32 - vy - vh).round() as i32,
                 (vx + vw).round() as i32,
                 (th as f32 - vy).round() as i32,
                 0,
-                0,
+                y0,
                 w as i32,
-                h as i32,
-                glow::DEPTH_BUFFER_BIT,
+                y1,
+                bit,
                 glow::NEAREST,
             );
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(dst));
+        }
+    }
+
+    /// The depth buffer so far at the Glide screen's size (the bottom row first if `lower`),
+    /// a picture late: this picture's read goes into a pixel buffer, `f` gets the last
+    /// picture's (done by now) mapped, as the depth buffer keeps it (floats 0..1, rows of
+    /// the screen's width). Waiting for the GPU at each read was about a fifth of a race; a
+    /// light's visibility a picture late is not seen. The first read (or one of another size)
+    /// waits for its own. (Read as 16-bit values, the driver converted them and the read
+    /// waited all the same.)
+    fn depth_late(&mut self, gl: &glow::Context, lower: bool, f: impl FnOnce(&[f32])) {
+        self.to_read_fbo(gl, true, lower);
+        let (w, h) = self.res;
+        let key = (w, h, lower);
+        let len = (w * h * 4) as i32;
+        let l = self.local(gl);
+        let k = l.depth_last.map_or(0, |j| j ^ 1);
+        unsafe {
+            let r = l.depth_reads[k].get_or_insert_with(|| DepthRead {
+                pbo: gl.create_buffer().expect("GL buffer"),
+                key: (0, 0, false),
+                fence: None,
+            });
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, Some(r.pbo));
+            if r.key != key {
+                gl.buffer_data_size(glow::PIXEL_PACK_BUFFER, len, glow::STREAM_READ);
+                r.key = key;
+            }
+            if let Some(f) = r.fence.take() {
+                gl.delete_sync(f);
+            }
             gl.read_pixels(
                 0,
                 0,
@@ -1858,24 +1977,44 @@ impl Glide {
                 h as i32,
                 glow::DEPTH_COMPONENT,
                 glow::FLOAT,
-                glow::PixelPackData::Slice(Some(&mut raw)),
+                glow::PixelPackData::BufferOffset(0),
             );
+            r.fence = gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0).ok();
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            let src = match l.depth_last {
+                Some(j) if l.depth_reads[j].as_ref().is_some_and(|r| r.key == key) => j,
+                _ => k,
+            };
+            l.depth_last = Some(k);
+            let r = l.depth_reads[src].as_mut().unwrap();
+            if let Some(f) = r.fence.take() {
+                gl.client_wait_sync(f, glow::SYNC_FLUSH_COMMANDS_BIT, i32::MAX);
+                gl.delete_sync(f);
+            }
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, Some(r.pbo));
+            let p = gl.map_buffer_range(glow::PIXEL_PACK_BUFFER, 0, len, glow::MAP_READ_BIT);
+            if !p.is_null() {
+                // (a mapped buffer is aligned for floats)
+                f(std::slice::from_raw_parts(p as *const f32, (w * h) as usize));
+                gl.unmap_buffer(glow::PIXEL_PACK_BUFFER);
+            }
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
         }
-        let d: Vec<f32> = raw
-            .chunks_exact(4)
-            .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
-            .collect();
+    }
+
+    /// The depth buffer's z-buffer values (`depth_late`: a picture late) at `points` of the
+    /// Glide screen (from the top left); None beside the screen.
+    fn depth_points(&mut self, gl: &glow::Context, points: &[(i64, i64)]) -> Vec<Option<u16>> {
+        let (w, h) = (self.res.0 as i64, self.res.1 as i64);
         let w_buffer = matches!(self.state.depth_mode, 2 | 4);
-        let mut out = Vec::with_capacity((w * h) as usize);
-        for y in 0..h {
-            out.extend(d[((h - 1 - y) * w) as usize..][..w as usize].iter().map(|&v| {
-                // z as drawn (ooz / 65535); w turned round as `buffer_clear` does (an
-                // approximation: Glide keeps w as a 4.12 float)
-                let v = if w_buffer { 1.0 - v } else { v };
-                (v.clamp(0.0, 1.0) * 65535.0).round() as u16
-            }));
-        }
+        let mut out = vec![None; points.len()];
+        self.depth_late(gl, false, |z| {
+            for (o, &(x, y)) in out.iter_mut().zip(points) {
+                if (0..w).contains(&x) && (0..h).contains(&y) {
+                    *o = Some(ooz(z[(y * w + x) as usize], w_buffer));
+                }
+            }
+        });
         out
     }
 
@@ -2037,25 +2176,8 @@ impl Glide {
                     p.copy_from_slice(&untouched);
                 }
             }
-        } else if buffer == 2 {
-            let z = self.read_depth(gl);
-            for y in 0..h {
-                let row = if lower { h - 1 - y } else { y };
-                for x in 0..w {
-                    m.wr16(buf + row * LFB_STRIDE + 2 * x, z[(y * w + x) as usize]);
-                }
-            }
         } else {
-            let px = self.read_screen(gl);
-            for y in 0..h {
-                let row = if lower { h - 1 - y } else { y };
-                for x in 0..w {
-                    m.wr16(
-                        buf + row * LFB_STRIDE + 2 * x,
-                        to_565(px[(y * w + x) as usize]),
-                    );
-                }
-            }
+            self.read_back(gl, buffer == 2, buf, lower);
         }
         self.lfb = Some(Lfb {
             buf,
@@ -2792,6 +2914,12 @@ fn buffer_swap(_: &mut Cpu) -> u32 {
 /// Keep the picture drawn so far (its colour), for `restore_picture`. Motorhead's motion blur
 /// draws each picture over the last one: with pictures between logic frames each starts from
 /// the logic frame's own, as at the game's frame rate.
+/// The depth buffer at `points` of the Glide screen (from the top left) as Glide's z-buffer
+/// keeps it, a picture late (`Glide::depth_late`); None beside the screen or without Glide.
+pub fn depth_at(points: &[(i64, i64)]) -> Vec<Option<u16>> {
+    with(|g, gl| g.depth_points(gl, points)).unwrap_or_else(|| vec![None; points.len()])
+}
+
 pub fn keep_picture() {
     with(|g, gl| g.kept_copy(gl, true));
 }

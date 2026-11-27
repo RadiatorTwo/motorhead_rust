@@ -30,6 +30,8 @@ enum Op {
     Int(u32),
     /// a branch over a fxch st(1) (a join inside the loop)
     Skip,
+    /// a branch over st(0) op= st(i) and a load and store (values written on one way only)
+    SkipArith(u32, u32),
     /// fldcw of control word j of the data block's four (24 bits truncating or to nearest,
     /// 53 bits)
     Cw(u32),
@@ -106,6 +108,20 @@ fn prog(a: &mut CodeAssembler) -> Result<(), IcedError> {
                 a.fxch(st0, st1)?;
                 a.set_label(&mut skip)?;
             }
+            Op::SkipArith(k, i) => {
+                let mut skip = a.create_label();
+                a.test(ecx, 2u32)?;
+                a.jnz(skip)?;
+                match k {
+                    0 => a.fadd_2(st0, sti(i))?,
+                    1 => a.fmul_2(sti(i), st0)?,
+                    _ => {
+                        a.fld(qword_ptr(eax + 8 * i))?;
+                        a.fstp(sti(i + 1))?;
+                    }
+                }
+                a.set_label(&mut skip)?;
+            }
         }
     }
     a.dec(ecx)?;
@@ -136,8 +152,9 @@ fn random_ops(rng: &mut Rng) -> Vec<Op> {
             12 if depth > 3 => Op::StorePop(r(rng, 16)),
             13 => Op::StoreF32(r(rng, 16)),
             14 if depth > 3 => Op::PopTo(r(rng, depth)),
-            15 => match r(rng, 3) {
+            15 => match r(rng, 4) {
                 0 => Op::Skip,
+                3 => Op::SkipArith(r(rng, 3), r(rng, depth)),
                 1 => Op::Int(r(rng, 16)),
                 _ => Op::Cw(r(rng, 4)),
             },
@@ -183,14 +200,28 @@ fn run(rng: &mut Rng, ops: &[Op], cached: bool) -> Vec<u8> {
     m.slice(SCRATCH, 640).to_vec()
 }
 
+/// Equal, but for which NaN: with two NaN operands SSE keeps the first one's, and the cached
+/// code may give an operation its operands the other way round (the uncached code does not
+/// follow the FPU's own rule either).
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.chunks(4).zip(b.chunks(4)).enumerate().all(|(k, (x, y))| {
+        let f = |c: &[u8]| f32::from_le_bytes(c.try_into().unwrap());
+        let d = |c: &[u8]| f64::from_le_bytes(c.try_into().unwrap());
+        let at = (k & !1) * 4..(k & !1) * 4 + 8;
+        x == y
+            || (f(x).is_nan() && f(y).is_nan())
+            || (d(&a[at.clone()]).is_nan() && d(&b[at]).is_nan())
+    })
+}
+
 #[test]
 fn x87_cache() {
     let mut rng = Rng(0x0123_4567_89ab_cdef);
-    for n in 0..300 {
+    for n in 0..1000 {
         let ops = random_ops(&mut rng);
         let seed = rng.next();
         let a = run(&mut Rng(seed), &ops, false);
         let b = run(&mut Rng(seed), &ops, true);
-        assert!(a == b, "program {n} differs with the cache: {ops:?}");
+        assert!(same(&a, &b), "program {n} differs with the cache: {ops:?}");
     }
 }

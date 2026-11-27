@@ -289,6 +289,31 @@ impl MemoryCopy {
             })
     }
 
+    /// Where two copies differ (first addresses, at most `max`), but in `skip`.
+    pub fn differ(&self, other: &MemoryCopy, skip: std::ops::Range<u32>, max: usize) -> Vec<u32> {
+        let mut out = Vec::new();
+        for ((lo, a), (lo2, b)) in self.parts.iter().zip(&other.parts) {
+            if lo != lo2 {
+                out.push(*lo);
+                continue;
+            }
+            let n = a.len().min(b.len());
+            for k in 0..n {
+                let at = lo + k as u32;
+                if a[k] != b[k] && !skip.contains(&at) {
+                    out.push(at);
+                    if out.len() >= max {
+                        return out;
+                    }
+                }
+            }
+            if a.len() != b.len() {
+                out.push(lo + n as u32);
+            }
+        }
+        out
+    }
+
     /// The heap's used blocks (address, size) in the copy.
     pub fn heap_blocks(&self) -> Vec<(u32, u32)> {
         self.heap.used.iter().map(|(&a, &s)| (a, s)).collect()

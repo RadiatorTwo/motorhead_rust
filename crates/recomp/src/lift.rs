@@ -288,6 +288,9 @@ pub struct Lifter<'a, 'f> {
     pub missing: Vec<String>,
     /// the x87 registers in Cranelift values (see `x87::Cache`)
     xc: x87::Cache,
+    /// ST(0..7) and the control word carried by the x87 cache to a join (`x87_edge`)
+    xv: [Variable; 8],
+    xcw: Variable,
     /// instructions reached otherwise than from the one before (the cache is empty there)
     joins: std::collections::HashSet<u32>,
     /// while lifting a straight run's version for the control word 0xc7f (see `versions`):
@@ -296,6 +299,10 @@ pub struct Lifter<'a, 'f> {
     /// while lifting a straight run's version for the usual control words (53 or 64 bits, to
     /// nearest): x87 arithmetic is the double operation, without the other cases' branches
     usual87: bool,
+    /// while lifting a straight run's version for 24 bits to nearest (0x07f, a renderer's):
+    /// x87 arithmetic is the double rounded to a float when that is the FPU's result (`floats`),
+    /// without reading the control word for each operation; else the general way
+    near24: bool,
     /// the flags live after each instruction (`flag_liveness`; `ALL_FLAGS` where unknown)
     live: HashMap<u32, u8>,
     /// the current instruction's: a flag no later instruction reads is not computed
@@ -333,6 +340,8 @@ impl<'a, 'f> Lifter<'a, 'f> {
             b.declare_var(I8),
         );
         let top = b.declare_var(I32);
+        let xv = std::array::from_fn(|_| b.declare_var(F64));
+        let xcw = b.declare_var(I16);
         let mut l = Lifter {
             b,
             f,
@@ -356,9 +365,12 @@ impl<'a, 'f> Lifter<'a, 'f> {
             dyn_block: None,
             missing: Vec::new(),
             xc: x87::Cache::default(),
+            xv,
+            xcw,
             joins: std::collections::HashSet::new(),
             rz: None,
             usual87: false,
+            near24: false,
             live: HashMap::new(),
             out: ALL_FLAGS,
         };
@@ -694,11 +706,14 @@ impl<'a, 'f> Lifter<'a, 'f> {
     }
 
     fn goto(&mut self, tgt: u32) {
+        self.x87_edge(tgt);
         let blk = self.target_block(tgt);
         self.b.ins().jump(blk, &[]);
     }
 
     fn branch(&mut self, c: Value, tgt: u32, next: u32) {
+        self.x87_edge(tgt);
+        self.x87_edge(next);
         let (t, n) = (self.target_block(tgt), self.target_block(next));
         self.b.ins().brif(c, t, &[], n, &[]);
     }
@@ -800,6 +815,16 @@ impl<'a, 'f> Lifter<'a, 'f> {
             .filter_map(|&a| direct_target(&code.at(a).unwrap()).filter(|&t| self.f.inside(t)))
             .collect();
         self.joins.insert(self.f.entry);
+        self.xc.carry_nothing(self.f.entry);
+        // overlapping instructions (Watcom's `test ax, imm` hiding a `mov`): an instruction
+        // reached by falling through from one that is not the one before it
+        for w in addrs.windows(2) {
+            let next = code.at(w[0]).unwrap().next_ip32();
+            if next != w[1] {
+                self.joins.insert(next);
+                self.joins.insert(w[1]);
+            }
+        }
         self.joins.extend(self.smc.variants.keys().copied());
         let runs = if self.xc.enabled {
             self.rz_runs(code, &addrs)
@@ -822,6 +847,9 @@ impl<'a, 'f> Lifter<'a, 'f> {
             let i = code.at(a).unwrap();
             let blk = self.blocks[&a];
             self.b.switch_to_block(blk);
+            if self.joins.contains(&a) {
+                self.x87_join(a);
+            }
             if heads.contains(&a) {
                 self.poll();
             }
@@ -969,6 +997,28 @@ impl<'a, 'f> Lifter<'a, 'f> {
         );
         self.blocks.extend(kept);
         self.b.switch_to_block(other);
+        if crate::config::env("NO_NEAR24").is_none() {
+            // 24 bits to nearest
+            let (n_blk, rest) = (self.b.create_block(), self.b.create_block());
+            let near = self.b.ins().icmp_imm_u(IntCC::Equal, pcrc, 0);
+            self.b.ins().brif(near, n_blk, &[], rest, &[]);
+            self.b.switch_to_block(n_blk);
+            self.near24 = true;
+            let kept: Vec<(u32, Block)> = run[1..]
+                .iter()
+                .map(|&a| (a, self.blocks.insert(a, self.b.create_block()).unwrap()))
+                .collect();
+            for (n, &a) in run.iter().enumerate() {
+                if n > 0 {
+                    let blk = self.blocks[&a];
+                    self.b.switch_to_block(blk);
+                }
+                self.emit(&code.at(a).unwrap());
+            }
+            assert!(!self.near24, "a version's run ends with the cache written back");
+            self.blocks.extend(kept);
+            self.b.switch_to_block(rest);
+        }
         if crate::config::env("NO_USUAL87").is_none() {
             // the usual control words: a version of their own (the general one's branches
             // spread its code: Recoil's vertex loop of ~40 instructions became ~7700)
@@ -1033,10 +1083,20 @@ impl<'a, 'f> Lifter<'a, 'f> {
             None => self.insn(i),
         };
         if !ends {
-            if self.joins.contains(&i.next_ip32()) {
+            if !self.xc.enabled && self.joins.contains(&i.next_ip32()) {
                 self.x87_settle();
             }
             self.goto(i.next_ip32());
+        } else {
+            // what follows is reached by jumps only (they carry the cache), but for the way
+            // on of a conditional branch, which keeps the cache
+            let on = i.flow_control() == FlowControl::ConditionalBranch
+                && self.f.inside(i.next_ip32())
+                && self.blocks.contains_key(&i.next_ip32())
+                && !self.joins.contains(&i.next_ip32());
+            if !on {
+                self.x87_forget();
+            }
         }
     }
 
@@ -1058,7 +1118,15 @@ impl<'a, 'f> Lifter<'a, 'f> {
         let m = i.mnemonic();
         // the x87 cache stays over plain integer instructions; anything that may branch, call
         // or reach a helper writes it back first, on the one path all later code follows
-        if !plain(i) || i.flow_control() != FlowControl::Next {
+        // (a direct branch carries the cache to its targets: `x87_edge`)
+        let carried = self.carry87()
+            && matches!(
+                i.flow_control(),
+                FlowControl::ConditionalBranch | FlowControl::UnconditionalBranch
+            )
+            && direct_target(i).is_some()
+            && !self.smc.imm.contains_key(&i.ip32());
+        if (!plain(i) || i.flow_control() != FlowControl::Next) && !carried {
             self.x87_settle();
         }
         match i.flow_control() {

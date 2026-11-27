@@ -22,7 +22,7 @@
 0x7499a9 player_car  the car object of player i at [0x7499a9 + i * 0x2c00] (8 players)
 0x747e28 player_viewed  the player the camera follows
 0x77d95c renderer  [+0x298]: its function table (Glide's at 0x505eb0: +0x28 the buffer swap)
-0x4be458 Glide_LightsVisible  locks the depth buffer (grLfbLock AUXBUFFER, read) and sets each light's [+0x40] = depth there < its z ([+0x44] x, [+0x48] y, [+0x4c] z, next [+0x50]): halos and lens flares drawn or not
+0x4be458 Glide_LightsVisible  locks the depth buffer (grLfbLock AUXBUFFER, read) and sets each light's [+0x40] = depth there < its z ([+0x44] x, [+0x48] y, [+0x4c] z, next [+0x50]): halos and lens flares drawn or not (depth < z * [0x504dd0]; lights' first at [0x52107c], read by 0x451064). Hooked: hooks.rs lights_visible
 0x80bbfc glide_grLfbLock  pointer from GetProcAddress (the Glide pointers are at 0x80bb8c..0x80bc10)
 0x41a3a4 Camera_SetFov  +0 = 1/tan(fov/2) from degrees (arg), clamped 0.5..10, then Camera_Make
 0x41a5f0 Camera_SetAspect  +0x18 = 1 / arg (the race's: viewport w/h x 0.5)
@@ -37,3 +37,7 @@
 0x43bd60 Control_Value  a task's control code (eax) active? strength 0..1 into [edx] (joystick axes analog, keys 1), ebx 1: only a new press (hooked: pad.rs)
 0x73ad18 control_tasks  the layout's control code per task, in the .clo order: TurnLeft, TurnRight, Accelerate, Brake, ShiftGearUp, ShiftGearDown, Horn, HandBrake, RearView, GameMenu, Info, ChatMode, InCarView, OutCarView, CameraView, RearMirror, CyclePlayers, ScreenShot
 0x43433c Joystick_Poll  DIJOYSTATE: buttons into 0x51c58c (dwords), axes minus their centre into 0x51c610 (x), 0x51c614 (y), 0x51c618 (z)
+0x414ca4 Fpu_Single  the control word's precision to 24 bits, rounding kept (the renderer runs under 0x07f); 0x414cc8 back to 53 bits
+0x456d4c Render_Polygons  the 3D renderer's big loop (0x456d4c..0x458bec): faces of an object, their points through 0x414e54, ~25% of a race
+0x414e54 Project_Point  a point (edx) through the matrix (ebx) to the screen (eax: x, y, z, 1/w) with clip flags at [ecx] (1 left, 2 right, 4 top, 8 bottom, 0x10 too near, 0x20 behind); in Rust: src/project.rs (MOTORHEAD_CHECK_PROJECT=1 compares with the game's code)
+0x4c17d6 Watcom_Trunc  frndint with the rounding set to truncate (float to integer)

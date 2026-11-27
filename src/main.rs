@@ -15,6 +15,9 @@ mod sprites;
 mod wide;
 mod blur;
 mod pad;
+mod project;
+mod fpu;
+mod polygons;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;

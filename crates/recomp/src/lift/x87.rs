@@ -18,6 +18,7 @@ use cranelift_codegen::ir::{
     Endianness, InstBuilder, Value, condcodes::FloatCC, condcodes::IntCC, types::*,
 };
 use iced_x86::{Instruction, MemorySize, Mnemonic, OpKind, Register};
+use std::collections::HashMap;
 use std::mem::offset_of;
 
 const C0: i64 = 0x100;
@@ -135,6 +136,22 @@ pub struct Cache {
     cw: Option<Value>,
     /// the control word's tests for the arithmetic (`Mode`), made where the run is
     mode: Option<Mode>,
+    /// what each join gets in the variables `Lifter::xv` / `xcw`: fixed by the first jump
+    /// lifted to it (or nothing if the join is lifted first), the others give the same
+    into: HashMap<u32, Carry>,
+}
+
+impl Cache {
+    pub fn carry_nothing(&mut self, a: u32) {
+        self.into.insert(a, Carry::default());
+    }
+}
+
+/// The x87 cache at a join: ST(i) carried (and whether memory lacks it), the control word.
+#[derive(Clone, Copy, Default)]
+struct Carry {
+    st: [Option<bool>; 8],
+    cw: bool,
 }
 
 /// What the control word says for the arithmetic's rounding.
@@ -146,6 +163,8 @@ struct Mode {
     usual: Value,
     /// 24 bits to nearest or truncating
     near_or_trunc: Value,
+    /// 24 bits to nearest
+    near: Value,
     /// what to add before cutting to 24 bits (half a unit to nearest, else 0)
     add: Value,
 }
@@ -166,9 +185,99 @@ impl Lifter<'_, '_> {
         self.xc.cw = None;
         self.xc.mode = None;
         self.usual87 = false;
+        self.near24 = false;
         // the end of a run's 0xc7f version: the SSE rounding as it was
         if let Some(old) = self.rz.take() {
             self.b.ins().call(self.refs.mxcsr_set, &[old]);
+        }
+    }
+
+    /// Forget the cache (at code reached by jumps only: what it held is theirs).
+    pub(super) fn x87_forget(&mut self) {
+        debug_assert!(self.rz.is_none() && !self.usual87 && !self.near24);
+        self.xc.vals = [None; 8];
+        self.xc.d = 0;
+        self.xc.cw = None;
+        self.xc.mode = None;
+    }
+
+    /// Before a jump to `tgt`: a join inside the function gets the cache in the variables
+    /// `xv` (ST(i), relative to TOP, which the jumps agree on whatever their way) as its
+    /// first lifted jump had it; memory is made to have what the join does not carry or
+    /// carries as written. Outside the function: memory has it all. The way on to straight
+    /// code (reached from here only) keeps the cache as it is.
+    pub(super) fn x87_edge(&mut self, tgt: u32) {
+        if !self.xc.enabled {
+            return;
+        }
+        let inside = self.f.inside(tgt) && self.blocks.contains_key(&tgt);
+        if inside && !self.joins.contains(&tgt) {
+            return;
+        }
+        if !self.carry87() {
+            self.x87_settle();
+            return;
+        }
+        // a run's version ends here (its jump to the join): what is loaded for the join
+        // below must not stay in the cache for the next version, lifted after it
+        let version = self.rz.is_some() || self.usual87 || self.near24;
+        if version {
+            self.x87_settle();
+        }
+        let want = if inside {
+            let now = Carry {
+                st: std::array::from_fn(|i| self.xc.vals[self.place(i as u32)].map(|v| v.1)),
+                // (always: a loop's operations then do not read it from memory in each pass)
+                cw: true,
+            };
+            *self.xc.into.entry(tgt).or_insert(now)
+        } else {
+            Carry::default()
+        };
+        for i in 0..8u32 {
+            let r = self.place(i);
+            if let Some((v, true)) = self.xc.vals[r]
+                && want.st[i as usize] != Some(true)
+            {
+                let p = self.slot(i);
+                self.b.ins().store(mf(), v, p, offset_of!(Cpu, st) as i32);
+                self.xc.vals[r] = Some((v, false));
+            }
+            if want.st[i as usize].is_some() {
+                let v = self.st(i);
+                self.b.def_var(self.xv[i as usize], v);
+            }
+        }
+        if want.cw {
+            let v = self.fcw();
+            self.b.def_var(self.xcw, v);
+        }
+        if version {
+            self.x87_forget();
+        }
+    }
+
+    /// Whether the cache goes over jumps (`x87_edge`) in this function.
+    /// (`<PREFIX>_NO_CARRY87`: written back before every jump, as before)
+    pub(super) fn carry87(&self) -> bool {
+        self.xc.enabled && crate::config::env("NO_CARRY87").is_none()
+    }
+
+    /// At a join: the cache as the jumps to it carry it (`x87_edge`).
+    pub(super) fn x87_join(&mut self, a: u32) {
+        if !self.carry87() {
+            return;
+        }
+        self.x87_forget();
+        let c = *self.xc.into.entry(a).or_default();
+        for i in 0..8 {
+            if let Some(dirty) = c.st[i] {
+                let v = self.b.use_var(self.xv[i]);
+                self.xc.vals[i] = Some((v, dirty));
+            }
+        }
+        if c.cw {
+            self.xc.cw = Some(self.b.use_var(self.xcw));
         }
     }
 
@@ -199,10 +308,25 @@ impl Lifter<'_, '_> {
             cw,
             usual,
             near_or_trunc,
+            near,
             add,
         };
         self.xc.mode = Some(m);
         m
+    }
+
+    /// The mode in a run's version for 24 bits to nearest (`Lifter::near24`): known but for
+    /// the control word itself (the general way's last resort, `rt_fpu_round`, takes it).
+    fn mode_near24(&mut self) -> Mode {
+        let cw = self.fcw();
+        let cw = self.b.ins().uextend(I32, cw);
+        Mode {
+            cw,
+            usual: self.iconst(I8, 0),
+            near_or_trunc: self.iconst(I8, 1),
+            near: self.iconst(I8, 1),
+            add: self.iconst(I64, 1 << 28),
+        }
     }
 
     /// The control word (I16).
@@ -416,7 +540,11 @@ impl Lifter<'_, '_> {
         if self.usual87 {
             return fast;
         }
-        let md = self.mode();
+        let md = if self.near24 {
+            self.mode_near24()
+        } else {
+            self.mode()
+        };
         let (cw, usual) = (md.cw, md.usual);
         let (slow, edge, call_blk, done) = (
             self.b.create_block(),
@@ -425,8 +553,22 @@ impl Lifter<'_, '_> {
             self.b.create_block(),
         );
         self.b.append_block_param(done, F64);
-        self.b.ins().brif(usual, done, &[fast.into()], slow, &[]);
+        if self.near24 {
+            self.b.ins().jump(slow, &[]);
+        } else {
+            self.b.ins().brif(usual, done, &[fast.into()], slow, &[]);
+        }
         self.b.switch_to_block(slow);
+        let between = self.b.create_block();
+        if matches!(op, FpuOp::Round) {
+            // a store of a float's value: exact in any mode
+            let ok = self.is_float(x);
+            self.b.ins().brif(ok, done, &[x.into()], between, &[]);
+        } else {
+            let (ok, r) = self.floats(op, x, y, fast, md.near);
+            self.b.ins().brif(ok, done, &[r.into()], between, &[]);
+        }
+        self.b.switch_to_block(between);
         let (ok, r) = self.round24_between(op, x, y, s, md);
         self.b.ins().brif(ok, done, &[r.into()], edge, &[]);
         self.b.switch_to_block(edge);
@@ -441,6 +583,79 @@ impl Lifter<'_, '_> {
         self.b.block_params(done)[0]
     }
 
+    /// Is the double a float's value (normal or zero), stored as a float without rounding?
+    fn is_float(&mut self, x: Value) -> Value {
+        let bits = self.b.ins().bitcast(I64, mf(), x);
+        let low = self.b.ins().band_imm_u(bits, (1 << 29) - 1);
+        let floats = self.b.ins().icmp_imm_u(IntCC::Equal, low, 0);
+        let mag = self.b.ins().band_imm_u(bits, i64::MAX);
+        let from_lo = self.b.ins().iadd_imm_s(mag, -0x3810_0000_0000_0000);
+        let normal = self.b.ins().icmp_imm_u(
+            IntCC::UnsignedLessThan,
+            from_lo,
+            0x47f0_0000_0000_0000 - 0x3810_0000_0000_0000,
+        );
+        let zero = self.b.ins().icmp_imm_u(IntCC::Equal, mag, 0);
+        let fine = self.b.ins().bor(normal, zero);
+        self.b.ins().band(floats, fine)
+    }
+
+    /// The float a double was made from by `fpromote` (a float loaded and stored again is
+    /// that float: no rounding to test for).
+    fn promoted(&self, v: Value) -> Option<Value> {
+        use cranelift_codegen::ir::{InstructionData, Opcode, ValueDef};
+        let ValueDef::Result(inst, _) = self.b.func.dfg.value_def(v) else {
+            return None;
+        };
+        match self.b.func.dfg.insts[inst] {
+            InstructionData::Unary {
+                opcode: Opcode::Fpromote,
+                arg,
+            } if self.b.func.dfg.value_type(arg) == F32 => Some(arg),
+            _ => None,
+        }
+    }
+
+    /// x op y with 24 bits to nearest when x and y are floats' values (at most 24 bits; a
+    /// renderer's numbers mostly are): the double `fast` rounded to a float is the FPU's
+    /// result (rounding twice, to 53 bits and then to 24, is right for + - * / and sqrt of
+    /// 24-bit numbers: 53 >= 2 * 24 + 2), if the result is a float's normal number (the FPU
+    /// keeps its wider exponent). (done, the result.) The general way (`round24_between`)
+    /// took ~60 instructions an operation; Motorhead's renderer runs under 0x07f.
+    fn floats(&mut self, op: FpuOp, x: Value, y: Value, fast: Value, near: Value) -> (Value, Value) {
+        const LOW: i64 = (1 << 29) - 1;
+        let xb = self.b.ins().bitcast(I64, mf(), x);
+        let low = self.b.ins().band_imm_u(xb, LOW);
+        let low = if matches!(op, FpuOp::Sqrt) {
+            low
+        } else {
+            let yb = self.b.ins().bitcast(I64, mf(), y);
+            let yl = self.b.ins().band_imm_u(yb, LOW);
+            self.b.ins().bor(low, yl)
+        };
+        let floats = self.b.ins().icmp_imm_u(IntCC::Equal, low, 0);
+        let r32 = self.b.ins().fdemote(F32, fast);
+        let r = self.b.ins().fpromote(F64, r32);
+        // the exact result at least a float's smallest normal (below it a float has fewer
+        // bits than the FPU) and the float finite (not rounded up beyond the largest)
+        let bits = self.b.ins().bitcast(I64, mf(), fast);
+        let mag = self.b.ins().band_imm_u(bits, i64::MAX);
+        let normal = self
+            .b
+            .ins()
+            .icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, mag, 0x3810_0000_0000_0000);
+        let rb = self.b.ins().bitcast(I32, mf(), r32);
+        let rmag = self.b.ins().band_imm_u(rb, 0x7fff_ffff);
+        let finite = self
+            .b
+            .ins()
+            .icmp_imm_u(IntCC::UnsignedLessThan, rmag, 0x7f80_0000);
+        let ok = self.b.ins().band(floats, near);
+        let ok = self.b.ins().band(ok, normal);
+        let ok = self.b.ins().band(ok, finite);
+        (ok, r)
+    }
+
     /// x op y under the control word 0xc7f, in a run's version where the SSE rounding
     /// truncates too (`Lifter::versions`): the double result is the exact one truncated, and
     /// truncating it to 24 bits gives the FPU's result, if it is a normal double or an exact
@@ -448,6 +663,8 @@ impl Lifter<'_, '_> {
     /// is made there, after the SSE mode changed, not moved elsewhere by Cranelift.
     fn arith_rz(&mut self, op: FpuOp, x: Value, y: Value) -> Value {
         const UNIT: i64 = 1 << 29;
+        // (read here, where the cache keeps it: the call's block below is a side way)
+        let cw = self.fcw();
         let s = match op {
             FpuOp::Add => self.b.ins().fadd(x, y),
             FpuOp::Sub => self.b.ins().fsub(x, y),
@@ -504,7 +721,6 @@ impl Lifter<'_, '_> {
         let zero = self.b.ins().band(zero, exact);
         self.b.ins().brif(zero, done, &[s.into()], call_blk, &[]);
         self.b.switch_to_block(call_blk);
-        let cw = self.fcw();
         let cw = self.b.ins().uextend(I32, cw);
         let o = self.iconst(I32, op as i64);
         let call = self.b.ins().call(self.refs.fpu_round, &[o, x, y, cw]);
@@ -793,6 +1009,10 @@ impl Lifter<'_, '_> {
                     let v = if i.memory_size() == MemorySize::Float32 && self.rz.is_some() {
                         // the SSE rounding truncates as the control word says
                         self.b.ins().fdemote(F32, v)
+                    } else if i.memory_size() == MemorySize::Float32
+                        && let Some(f) = self.promoted(v)
+                    {
+                        f
                     } else if i.memory_size() == MemorySize::Float32 {
                         // rounded to a float as the control word says
                         let v = self.arith(FpuOp::Round, v, v);

@@ -260,18 +260,14 @@ pub fn picture(size: (u32, u32), paced: Duration, shown: Duration) {
             super::glide::filtering(),
             super::glide::texture_lod()
         );
-        // the pace keeps to these refreshes (a wrong period slows the pictures down)
-        match super::window::vblank() {
-            Some((_, p)) => log!(
-                "display: compositor refresh every {:.2} ms ({:.1} Hz)",
-                p.as_secs_f64() * 1000.0,
-                1.0 / p.as_secs_f64()
-            ),
-            None => log!(
-                "display: compositor refresh unknown, refresh rate {:?} Hz",
-                super::window::refresh_hz()
-            ),
-        }
+        // the pace keeps to the window's display; the compositor's rate beside it (another
+        // display's with two)
+        let hz = |v: Option<f64>| v.map_or("unknown".into(), |v| format!("{v:.1} Hz"));
+        log!(
+            "display: the window's display {}, the compositor {}",
+            hz(super::window::refresh_hz()),
+            hz(super::window::vblank().map(|(_, p)| 1.0 / p.as_secs_f64()))
+        );
         let h = hooked();
         if h.is_empty() {
             log!("hooked: none");

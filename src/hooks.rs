@@ -18,6 +18,9 @@ pub fn all() -> Vec<(u32, Hook)> {
     let table: &[(Us, Hook)] = &[
         (POW10_TABLE, pow10_table),
         (PATH_NEAREST, path_nearest),
+        (LIGHTS_VISIBLE, lights_visible),
+        (crate::project::PROJECT_POINT, crate::project::project_point),
+        (crate::polygons::RENDER_POLYGONS, crate::polygons::render_polygons),
         (crate::frames::RACE_FRAME, crate::frames::race_frame),
         (crate::frames::CLOCK_ADVANCE, crate::frames::clock_advance),
         (crate::frames::RACE_DRAW, crate::frames::race_draw),
@@ -68,6 +71,45 @@ fn path_nearest(c: &mut Cpu) {
         }
     }
     call_original(c, PATH_NEAREST.at());
+}
+
+/// Glide_LightsVisible: for each light of the list (first at `[LIGHTS]`, next at [+0x50]) at
+/// screen point ([+0x44], [+0x48], floats, truncated), visible ([+0x40] = 1) if the depth
+/// buffer's z-buffer value there is below its z [+0x4c] times `[DEPTH_SCALE]`. The game
+/// locks the whole depth buffer for this (grLfbLock AUXBUFFER, read) and reads one value a
+/// light: converting the whole screen to Glide's format each picture was ~10% of a race.
+/// Here the values are read at the lights' points only, from the same picture-late depth
+/// (`glide::depth_at`). A light beside the screen is hidden (the game read memory beside
+/// the buffer). Keeps ebx, ecx, edx, esi as the game's; eax 1 (grLfbUnlock's), 0 without
+/// lights.
+const LIGHTS_VISIBLE: Us = Us(0x4be458);
+const LIGHTS: Us = Us(0x52107c);
+const DEPTH_SCALE: Us = Us(0x504dd0);
+
+fn lights_visible(c: &mut Cpu) {
+    use recomp::rt::{EAX, ESP};
+    let m = win32::platform::mem();
+    let f = |a: u32| f32::from_bits(m.rd32(a));
+    let mut lights = Vec::new();
+    let mut l = m.rd32(LIGHTS.at());
+    // (a list gone round in a circle stops)
+    while l != 0 && lights.len() < 4096 {
+        lights.push(l);
+        l = m.rd32(l + 0x50);
+    }
+    let points: Vec<(i64, i64)> = lights
+        .iter()
+        .map(|&l| (f(l + 0x44).trunc() as i64, f(l + 0x48).trunc() as i64))
+        .collect();
+    let depth = win32::platform::glide::depth_at(&points);
+    let scale = f(DEPTH_SCALE.at()) as f64;
+    for (&l, d) in lights.iter().zip(depth) {
+        let z = f(l + 0x4c) as f64 * scale;
+        let visible = d.is_some_and(|d| (d as f64) < z);
+        m.wr32(l + 0x40, visible as u32);
+    }
+    c.r[EAX] = !lights.is_empty() as u32;
+    c.r[ESP] += 4;
 }
 
 // Example: the game's frame wait, where debug commands and savestates can run.

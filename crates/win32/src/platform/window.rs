@@ -1023,28 +1023,38 @@ pub fn vblank() -> Option<(std::time::Instant, Duration)> {
     None
 }
 
-/// The refresh rate of the display the window is on (Hz), looked up again every 2 s (it
-/// changes when the window moves to another display). None when unknown, or when not yet
-/// looked up on the window's thread (other threads get the last value).
+/// The refresh rate of the display the window is on (Hz), any thread: the window's thread
+/// looks it up again every 2 s (`note_refresh`; it changes when the window moves to another
+/// display or the display's mode changes). None when unknown or not looked up yet. Not the
+/// compositor's (`vblank`): with two displays, or after a change of mode, that one can be
+/// another display's (240 Hz given for a display at 60).
 pub fn refresh_hz() -> Option<f64> {
-    static LAST: Mutex<Option<(std::time::Instant, Option<f64>)>> = Mutex::new(None);
-    let mut last = LAST.lock().unwrap();
-    if let Some((at, hz)) = *last {
-        if at.elapsed() < Duration::from_secs(2) || !on_main() {
-            return hz;
-        }
-    } else if !on_main() {
-        return None;
+    if on_main() {
+        HOST.with(|h| {
+            if let Ok(h) = h.try_borrow() {
+                if let Some(w) = h.as_ref().and_then(|h| h.app.window.as_ref()) {
+                    note_refresh(w);
+                }
+            }
+        });
     }
-    let hz = with_host(|h| {
-        h.app
-            .window
-            .as_ref()
-            .and_then(|w| w.current_monitor())
-            .and_then(|m| m.refresh_rate_millihertz())
-    })
-    .filter(|&mhz| mhz >= 20_000)
-    .map(|mhz| mhz as f64 / 1000.0);
+    REFRESH.lock().unwrap().and_then(|(_, hz)| hz)
+}
+
+/// When the refresh rate was looked up last, and what it was.
+static REFRESH: Mutex<Option<(std::time::Instant, Option<f64>)>> = Mutex::new(None);
+
+/// The window's thread: the refresh rate of `w`'s display looked up, if 2 s have passed.
+fn note_refresh(w: &Window) {
+    let mut last = REFRESH.lock().unwrap();
+    if last.is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(2)) {
+        return;
+    }
+    let hz = w
+        .current_monitor()
+        .and_then(|m| m.refresh_rate_millihertz())
+        .filter(|&mhz| mhz >= 20_000)
+        .map(|mhz| mhz as f64 / 1000.0);
     if last.is_none_or(|(_, old)| old != hz) {
         log!(
             "display: refresh rate {}",
@@ -1052,7 +1062,6 @@ pub fn refresh_hz() -> Option<f64> {
         );
     }
     *last = Some((std::time::Instant::now(), hz));
-    hz
 }
 
 /// Is the window fullscreen?
@@ -1419,6 +1428,9 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.create(el);
+        if let Some(w) = &self.window {
+            note_refresh(w);
+        }
     }
 
     fn device_event(

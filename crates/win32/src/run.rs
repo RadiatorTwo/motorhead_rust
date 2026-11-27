@@ -142,6 +142,10 @@ fn start() -> u32 {
             st.compile_ms
         );
     }
+    // (a function Cranelift refused runs into "not supported yet" when called)
+    for (addr, e) in &st.failed {
+        eprintln!("warning: function {addr:#x} not compiled: {e}");
+    }
     let code = platform::run_game(&img, &dlls, dir);
 
     drop(compiled);
