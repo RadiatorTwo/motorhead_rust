@@ -19,10 +19,12 @@
 
 use recomp::rt::{Cpu, ESP, call_original};
 use recomp::ver::Us;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use win32::GlideExt;
+use win32::platform::options::Row;
+use win32::platform::setting::Setting;
 use win32::platform::tween::{self, LogicClock, Pacer, Statics};
 use win32::platform::{guest_call, hold_turn, input_clock, mem, without_turn};
 
@@ -101,7 +103,7 @@ pub fn race_frame(c: &mut Cpu) {
         // a recording's start: the whole game saved, or loaded in a replay
         input_clock::start(c);
     }
-    LOGIC.frame(|| picture(c), &PACER, pace().period);
+    LOGIC.frame(|| picture(c), &PACER, pace(VSYNC.get()).period);
     *LAST.lock().unwrap() = Some(Instant::now());
     input_clock::logic_frame(LOGIC.frame_time());
     FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -166,27 +168,105 @@ fn picture_inner(c: &mut Cpu) {
     tween::restore(c, &regs);
 }
 
-/// The pictures' pace: a picture each refresh of the display (each second, third... above
-/// `MAX_FPS`), kept to its refreshes, else `DEFAULT_FPS`.
+/// Vsync in the race (F10, Display): a picture changes only at the display's refresh.
+static VSYNC: Setting = Setting::new("VSync", "VSYNC", true);
+
+/// The frame limit's choices (F10, Display): pictures a second. `FPS_DISPLAY`: one each
+/// refresh (at most `MAX_FPS`), `FPS_NONE`: no limit. None under the logic rate: each logic
+/// frame shows a picture.
+const FPS_CHOICES: [u32; 9] = [FPS_DISPLAY, 60, 90, 120, 144, 165, 240, 360, FPS_NONE];
+const FPS_DISPLAY: u32 = 0;
+const FPS_NONE: u32 = 1;
+/// The limit chosen (registry `FpsLimit`), `u32::MAX` not read yet.
+static FPS_LIMIT: AtomicU32 = AtomicU32::new(u32::MAX);
+
+fn fps_limit() -> u32 {
+    let v = FPS_LIMIT.load(Ordering::Relaxed);
+    if v != u32::MAX {
+        return v;
+    }
+    let v = win32::platform::advapi32::value("", "FpsLimit")
+        .and_then(|(_, d)| Some(u32::from_le_bytes(d.get(..4)?.try_into().ok()?)))
+        .filter(|v| FPS_CHOICES.contains(v))
+        .unwrap_or(FPS_DISPLAY);
+    FPS_LIMIT.store(v, Ordering::Relaxed);
+    v
+}
+
+fn set_fps_limit(v: u32) {
+    FPS_LIMIT.store(v, Ordering::Relaxed);
+    win32::platform::advapi32::set_value("", "FpsLimit", 4, &v.to_le_bytes());
+}
+
+/// The menu's rows for vsync and the frame limit (the race's pictures; the menus stay at the
+/// game's 60, it counts their frames).
+pub fn options() -> [Row; 2] {
+    [
+        Row::on_off(
+            "Vsync",
+            "Pictures change at the display's refresh (no tearing)",
+            || VSYNC.get(),
+            |on| VSYNC.set(on),
+        ),
+        Row::choice(
+            "Frame limit",
+            "Most pictures a second in the race; Display: its refresh rate",
+            || {
+                let text = |n: u32| match n {
+                    FPS_DISPLAY => "Display".to_string(),
+                    FPS_NONE => "Unlimited".into(),
+                    n => n.to_string(),
+                };
+                let cur = FPS_CHOICES.iter().position(|&n| n == fps_limit()).unwrap_or(0);
+                (FPS_CHOICES.iter().map(|&n| text(n)).collect(), cur)
+            },
+            |k| set_fps_limit(FPS_CHOICES[k]),
+        ),
+    ]
+}
+
+/// The pictures' pace: by the frame limit; on the display's refreshes with vsync.
 struct Pace {
     period: Duration,
     refresh: Option<(Instant, Duration)>,
 }
 
-fn pace() -> Pace {
+fn pace(vsync: bool) -> Pace {
     let refresh = win32::platform::window::vblank();
     let hz = match refresh {
         Some((_, p)) => Some(1.0 / p.as_secs_f64()),
         None => win32::platform::window::refresh_hz(),
     };
-    let period = match hz {
+    let period = match (fps_limit(), hz) {
+        // a picture each refresh of the display (each second, third... above `MAX_FPS`)
         // (480.001 Hz is two refreshes a picture at 240, not three)
-        Some(hz) => (hz / MAX_FPS - 0.01).ceil().max(1.0) / hz,
-        None => 1.0 / DEFAULT_FPS,
+        (FPS_DISPLAY, Some(hz)) => (hz / MAX_FPS - 0.01).ceil().max(1.0) / hz,
+        (FPS_DISPLAY, None) => 1.0 / DEFAULT_FPS,
+        // with vsync no more than one a refresh
+        (FPS_NONE, Some(hz)) if vsync => 1.0 / hz,
+        (FPS_NONE, _) => 0.0,
+        (n, _) => 1.0 / n as f64,
     };
     Pace {
         period: Duration::from_secs_f64(period),
-        refresh,
+        // without vsync by our own clock alone
+        refresh: refresh.filter(|_| vsync),
+    }
+}
+
+/// Vsync and the frame limit into the log, at the first picture and when they change.
+fn log_pace(vsync: bool) {
+    static LOGGED: Mutex<Option<(bool, u32)>> = Mutex::new(None);
+    let now = (vsync, fps_limit());
+    let mut l = LOGGED.lock().unwrap();
+    if *l != Some(now) {
+        *l = Some(now);
+        let limit = match now.1 {
+            FPS_DISPLAY => "display".to_string(),
+            FPS_NONE => "unlimited".into(),
+            n => n.to_string(),
+        };
+        eprintln!("settings: vsync {vsync}, frame limit {limit}");
     }
 }
 
@@ -205,8 +285,10 @@ impl GlideExt for Frames {
     }
 
     fn before_shown(&self) {
-        let p = pace();
-        win32::platform::gl::set_vsync(true);
+        let vsync = VSYNC.get();
+        log_pace(vsync);
+        let p = pace(vsync);
+        win32::platform::gl::set_vsync(vsync);
         without_turn(|| PACER.pace_on(p.period, p.refresh));
     }
 }

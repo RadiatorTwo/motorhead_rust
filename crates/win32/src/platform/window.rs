@@ -1440,6 +1440,9 @@ impl ApplicationHandler for App {
         match e {
             WindowEvent::CloseRequested => self.push(Input::Close),
             WindowEvent::Focused(f) => {
+                // (a window without the focus may be slowed down: the driver's background
+                // frame limit, Windows' efficiency mode)
+                log!("window: focus {}", if f { "gained" } else { "lost" });
                 self.focused = f;
                 // Windows drops a confinement when the focus goes: set it anew when it comes back
                 self.cursor_caught = false;

@@ -97,6 +97,8 @@ Tab) switch between the pages. Escape or F10 closes the menu. The mouse works to
 | Textures | Sharper textures from a distance: Original, Trilinear or Anisotropic. |
 | Frame rate display | Shows how many pictures per second you get. F12 does the same. |
 | Widescreen | Races as wide as the window, the HUD in the middle. On by default. |
+| Vsync | The picture changes only when the screen refreshes, so it never tears. On by default. |
+| Frame limit | The most pictures per second in a race. "Display" matches your screen's refresh rate (up to 240). |
 
 **Advanced**
 

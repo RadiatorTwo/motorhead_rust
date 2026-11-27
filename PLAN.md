@@ -93,6 +93,10 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
 - [x] high resolution, settings (the kit's F10 menu: page Display with fullscreen,
   resolution, anti-aliasing, textures, frame rate): the user checked it with widescreen
   (2026-11-26)
+- [x] vsync and frame limit in the F10 menu, page Display (2026-11-27, `frames.rs`): Vsync
+  on/off (registry `VSync`), Frame limit Display / 60..360 / Unlimited (registry `FpsLimit`, 0
+  Display, 1 Unlimited). Only the race's pictures, the menus stay at 60 (the game counts their
+  frames). No choice under 60: each logic frame draws a picture.
 - [x] gamepad (2026-11-26, `pad.rs`): the game asks for each race task through 0x43bd60
   (Control_Value, codes in 0x73ad18): hooked, the pad answers besides the chosen layout:
   stick/D-pad steer and RT/LT gas/brake analog (strength 0..1, as the game's joystick axes),
@@ -100,7 +104,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
   `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
   gives 40 mph where full gives 117. The user: menu with A works, analog fine; steering squared (linear was twitchy).
-- [x] release (tag `v*`): v0.3.0, v0.3.1 (2026-11-27)
+- [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27)
 - [x] Linux under Wayland hung at the loading screen (2026-11-27): EGL lets the window's
   surface be current in one thread only; the present thread's shared context got
   EGL_BAD_ACCESS and died at the first Glide picture. Off Windows a context now holds the

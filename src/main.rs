@@ -120,7 +120,10 @@ impl Game for MyGame {
                     options::textures(),
                     options::frame_rate_display(),
                     wide::option(),
-                ],
+                ]
+                .into_iter()
+                .chain(frames::options())
+                .collect(),
             },
             // optional improvements beyond the original's look
             options::Page {

@@ -197,6 +197,7 @@ impl Gl {
         let _ = surface.set_swap_interval(&context, SwapInterval::DontWait);
         let gl =
             unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
+        super::sysinfo::gl_driver(&gl);
         let blit = compile(&gl, BLIT_VS, BLIT_FS);
         let vao = unsafe { gl.create_vertex_array() }.expect("GL vertex array");
         let frame = texture(&gl, false);

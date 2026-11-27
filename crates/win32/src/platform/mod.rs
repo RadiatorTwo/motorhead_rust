@@ -34,6 +34,7 @@ pub mod sample;
 pub mod savestate;
 pub mod setting;
 pub mod stats;
+pub mod sysinfo;
 pub mod text;
 pub mod tween;
 pub mod user32;

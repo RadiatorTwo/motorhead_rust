@@ -62,6 +62,7 @@ pub fn run(g: &'static dyn Game) -> ! {
     // takes the base as a constant when it is at rt::FIXED_BASE
     platform::reserve_memory();
     output();
+    platform::sysinfo::system();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = g.command(&args) {
         std::process::exit(code);

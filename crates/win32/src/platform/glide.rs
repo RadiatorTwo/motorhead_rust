@@ -2774,10 +2774,13 @@ fn buffer_swap(_: &mut Cpu) -> u32 {
         )
     });
     if let Some((tex, (w, h), gamma)) = shown {
+        let t0 = std::time::Instant::now();
         if let Some(x) = crate::game::game().glide() {
             x.before_shown();
         }
+        let t1 = std::time::Instant::now();
         super::window::show_texture(tex, w, h, gamma);
+        super::sysinfo::picture((w, h), t1 - t0, t1.elapsed());
         // the next frame follows the window
         let (ww, wh) = super::display::render_size();
         let a = aspect(Some(ww as f32 / wh.max(1) as f32));
