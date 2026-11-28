@@ -79,6 +79,11 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
 - `src/frames.rs` the race at 60 Hz logic, pictures between logic frames (0x4775d8 drawn
   again, static data put back) paced to the display (max 240 fps); `src/pictures.rs` cars
   and camera interpolated while drawing.
+- Game functions in Rust, identical to the lifted original (each with a check switch that
+  runs both and compares): `src/project.rs` 0x414e54 (`MOTORHEAD_CHECK_PROJECT=1`),
+  `src/polygons.rs` 0x456d4c, its common ways, the game's function for the rest
+  (`MOTORHEAD_CHECK_POLYGONS=n`: every n-th call on a memory copy; the window looks hung
+  then). `src/fpu.rs`: x87 rounding as the lifter does it, for such code.
 - `src/loaded.rs` the interpreter for loaded code; `src/font.rs`, `src/sprites.rs` the
   replaced drawers (each the game's loop, registers carried as in the original).
 - Framework changes made here (not yet in recomp_kit, see PLAN.md "Kit"): Watcom sections

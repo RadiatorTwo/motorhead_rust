@@ -1,6 +1,20 @@
 # PLAN — Motorhead
 
-## Now (2026-11-27): frame rate (issue #1)
+## Now (2026-11-28): frame rate (issue #1)
+
+Next, in this order:
+1. 0x456d4c's remaining ways in Rust (`src/polygons.rs`, see the entry below): mode 2
+   (0x45778e, ~75k of rec8's 3000-check run), the near plane cut (0x458794, 0x4566b8, ~67k),
+   [obj+0xa8] != 0 (0x45705d), the low detail level. Done: colour mode 4 with [face+1] flag 1
+   (the reflection, 0x45839e with 0x441dc8). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
+   the ways' counts in the check's summary (which way is still the game's).
+2. A release for issue #1's reporter (ask for motorhead.log: both refresh rates).
+3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
+4. The depth read's remaining wait (~5%), then the next hot functions (0x4bc2f8 Glide_Scene,
+   0x455e40, 0x414b68).
+
+All below is committed (250515c, 9f91d2a) and pushed, the lifter also in recomp_kit
+(c86f16a).
 
 - Pacing: with vsync the swap paces (interval = refreshes a picture), our clock only for a
   limit that is no whole number of refreshes or without vsync; the rate is the window's
@@ -37,9 +51,6 @@
 - The laptop (i5-1145G7, Iris Xe) with this state: vsync 60 fps (was 30). Fullscreen stays at
   60 with vsync off too (borderless through the compositor: GL cannot go faster than the
   display there; not a fault). Window at 1920x1080 ~80 fps (GPU bound there).
-- Not committed yet (all of the above). Open for the user: commit and a release for the
-  reporter (ask him for motorhead.log, it now names both refresh rates); the x87 change
-  and `even24` also into recomp_kit (asked, no answer yet).
 - 0x414e54 (Project_Point) in Rust (`src/project.rs`): the same operations in the same
   order on doubles, each rounded to a float (the FPU at 24 bits while the result is a float's
   normal number; else, or another control word, the game's code runs). x87 registers and TOP
@@ -58,8 +69,7 @@
   store of a float's value needs no rounding (`is_float`); straight runs get a version for
   0x07f (`Lifter::near24`, beside 0xc7f's and the usual one: no mode per operation, `floats`
   first). Test `x87_store_floats`. rec8: early 311-365 -> 335-415 fps, 0x456d4c 21.8% ->
-  20.3%. Still to do there: the loops' x87 between branches (each loop head settles the
-  cache and works out the mode again), or 0x456d4c in Rust (a session or more).
+  20.3%.
 - Lifter (2026-11-28): synced with recomp_kit both ways (three-way merge per file, base
   97d9c36): from the kit rustcoil's x87 speed (TOP read once a run, status word and control
   word in variables, rare rounding ways cold, rep movs as a loop; tests `alias.rs`,
@@ -97,8 +107,12 @@
   mode 1 454k, far 332k, mode 4 443k, the game's 525k (465k of it mode 4 with [+1] flag 1:
   0x458092 / 0x45839e with 0x441dc8; mode 2 48k; cut at the near plane 12k). 0x456d4c
   18.4% -> 8.9% of a race. `src/fpu.rs`: the lifter's x87 rounding for Rust code.
-  Next: mode 4 with [+1] flag 1 (0x45839e, [0x739f2c] != 1), then mode 2 (0x45778e), the
-  near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
+  Then (2026-11-28) mode 4 with [+1] flag 1, [0x739f2c] != 1 (`reflection`: texture
+  [0x520f08], uvs from the screen place and the normal turned by the matrix, 0x441dc8, list
+  0x520f0c; with [0x739f2c] = 1 the face is drawn twice, 0x45896b, still the game's): rec8
+  3000 checks, 0 differ; ways behind 371k, outside 510k, mode 1 2.63M, far 690k, mode 4
+  884k, reflect 772k, the game's 142k (mode 1 cut 67k, mode 2 75k).
+  Next: mode 2 (0x45778e), the near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
   memory copy each): fine for a check, the window looks hung.
 - Then the depth read's remaining ~5% wait.
 

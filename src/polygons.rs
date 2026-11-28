@@ -61,8 +61,10 @@ enum Way {
     Far,
     /// colour mode 4, close, not cut
     Mode4,
+    /// colour mode 4 with a reflection ([face+1] flag 1), close, not cut
+    Reflect,
 }
-static WAYS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+static WAYS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
 
 fn ours(c: &mut Cpu) {
     let way = run(c);
@@ -223,6 +225,25 @@ fn run(c: &mut Cpu) -> Way {
         let head = finish(&fpu, rec, n, list);
         ret(c, face, rec, n, head);
         return Way::Mode4;
+    }
+    // 0x457b1b with [face+1] flag 1 and [0x739f2c] != 1: the same colours, the reflection's
+    // texture and uvs instead of the face's: 0x457bc4 -> 0x457832 -> 0x458081 -> 0x45839e ->
+    // 0x45875e -> 0x458909 (-> 0x45895a: no second polygon)
+    if m.rd32(obj + 0xa8) == 0
+        && close != 0
+        && mode == 4
+        && near_count == 0
+        && f1 & 0x11 == 1
+        && m.rd32(REFLECT_TWICE.at()) != 1
+    {
+        let lit = Lit { face, obj, rec, ebx: entry[EBX] };
+        colours_mode4(c, &fpu, &lit, n);
+        c.r = entry;
+        fog(&fpu, rec, n);
+        reflection(&fpu, face, obj, rec, n);
+        let head = finish(&fpu, rec, n, Us(0x520f0c).at());
+        ret(c, face, rec, n, head);
+        return Way::Reflect;
     }
     if check_every().is_some() {
         // which way the game's function goes on (for choosing what to write next)
@@ -420,6 +441,61 @@ fn texture(rec: u32, face: u32, n: u32) {
     }
 }
 
+/// 1: a reflecting face is drawn twice (its colours, then the reflection: 0x458092,
+/// 0x45896b)
+const REFLECT_TWICE: Us = Us(0x739f2c);
+
+/// 0x45839e: a reflecting face (no point cut at the near plane): the reflection's texture
+/// ([0x520f08]) and each point's uv from its place on the screen plus its normal turned by
+/// the object's matrix (0x441dc8), kept in 0..1.
+fn reflection(fpu: &Fpu, face: u32, obj: u32, rec: u32, n: u32) {
+    let m = win32::platform::mem();
+    let s = fpu.f32_bits(fpu.mul(from_f32(m.rd32(Us(0x52128c).at())), q64(Us(0x4fbca6).at())));
+    let s = from_f32(s);
+    m.wr8(rec, m.rd8(rec) | 2);
+    m.wr32(rec + 0xb4, m.rd32(Us(0x520f08).at()));
+    let (cx, cy) = (from_f32(m.rd32(Us(0x521298).at())), from_f32(m.rd32(Us(0x52129c).at())));
+    let (h, g) = (from_f32(m.rd32(Us(0x4fbcbe).at())), from_f32(m.rd32(Us(0x4fbcb6).at())));
+    let matrix = obj + 0x34;
+    let (points, normals) = (m.rd32(face + 8), m.rd32(face + 0xc));
+    for k in 0..n {
+        let p = PROJECTED.at() + 16 * m.rd16(points + 2 * k) as u32;
+        let at = rec + 0x20 * k;
+        for j in 0..4 {
+            m.wr32(at + 4 + 4 * j, m.rd32(p + 4 * j));
+        }
+        // 0x458472
+        let a = fpu.sub(from_f32(m.rd32(at + 4)), cx);
+        let b = fpu.sub(cy, from_f32(m.rd32(at + 8)));
+        let u0 = from_f32(fpu.f32_bits(fpu.mul(s, a)));
+        let v0 = from_f32(fpu.f32_bits(fpu.mul(b, s)));
+        // 0x441dc8: the normal times the matrix's first two columns
+        let nv = m.rd32(obj + 0x94) + 12 * m.rd16(normals + 2 * k) as u32;
+        let r = [0, 1].map(|i| {
+            let e = |a: u32| from_f32(m.rd32(a));
+            let x = fpu.mul(e(nv + 4), e(matrix + 0xc + 4 * i));
+            let y = fpu.mul(e(nv), e(matrix + 4 * i));
+            let z = fpu.mul(e(nv + 8), e(matrix + 0x18 + 4 * i));
+            from_f32(fpu.f32_bits(fpu.add(fpu.add(x, y), z)))
+        });
+        // 0x4584d7
+        let u = fpu.add(fpu.add(u0, h), fpu.mul(r[0], g));
+        let v = fpu.add(fpu.add(h, v0), fpu.mul(g, r[1]));
+        for (off, t) in [(0x1c, u), (0x20, v)] {
+            let bits = fpu.f32_bits(t);
+            let t = from_f32(bits);
+            let bits = if 0.0 > t {
+                0
+            } else if 1.0 >= t {
+                bits
+            } else {
+                0x3f80_0000
+            };
+            m.wr32(at + off, bits);
+        }
+    }
+}
+
 /// 0x458909: each point's [+0xc] = [0x521274] times its [+0x10]; the polygon put first in
 /// `list` and the next one's record begun. The list's old head (edx at the end).
 fn finish(fpu: &Fpu, rec: u32, n: u32, list: u32) -> u32 {
@@ -490,7 +566,7 @@ fn checked(c: &mut Cpu) {
     if n.is_power_of_two() || n % 1000 == 0 {
         let w: Vec<u64> = WAYS.iter().map(|w| w.load(Relaxed)).collect();
         eprintln!(
-            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4) {w:?}",
+            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4, reflect) {w:?}",
             DIFF.load(Relaxed)
         );
         let mut k: Vec<(u32, u64)> = KEYS.lock().unwrap().iter().map(|(&a, &b)| (a, b)).collect();
