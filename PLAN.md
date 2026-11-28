@@ -280,7 +280,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   Then: the list's last entry "Fullscreen" (the display's size; the label through the game's
   sprintf), the others a window; the Render device row (0x4840c8 took the "nearest"
   resolution by |dw*dh|, so 1920x1080 became 1440x1080) keeps the chosen one. Checked both.
-- [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27), v0.3.3 (2026-11-28)
+- [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27), v0.3.3, v0.4.0 (2026-11-28)
 - [x] Linux under Wayland hung at the loading screen (2026-11-27): EGL lets the window's
   surface be current in one thread only; the present thread's shared context got
   EGL_BAD_ACCESS and died at the first Glide picture. Off Windows a context now holds the

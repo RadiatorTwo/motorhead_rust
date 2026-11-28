@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "indeo"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "png",
 ]
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "motorhead"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "iced-x86",
  "recomp",
@@ -1753,7 +1753,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "recomp"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "iced-x86",
  "recomp",
@@ -2473,7 +2473,7 @@ dependencies = [
 
 [[package]]
 name = "win32"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "cpal",
