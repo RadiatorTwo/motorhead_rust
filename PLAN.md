@@ -3,10 +3,10 @@
 ## Now (2026-11-28): frame rate (issue #1)
 
 Next, in this order:
-1. 0x456d4c's remaining ways in Rust (`src/polygons.rs`, see the entry below): mode 2
-   (0x45778e, ~75k of rec8's 3000-check run), the near plane cut (0x458794, 0x4566b8, ~67k),
-   [obj+0xa8] != 0 (0x45705d), the low detail level. Done: colour mode 4 with [face+1] flag 1
-   (the reflection, 0x45839e with 0x441dc8). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
+1. 0x456d4c's remaining ways in Rust (`src/polygons.rs`, see the entry below): the near
+   plane cut (0x458794, 0x4566b8: nearly all the game's calls left, ~74k of rec8's 2048-check
+   run), [obj+0xa8] != 0 (0x45705d), the low detail level. Done: colour mode 4 with [face+1]
+   flag 1 (the reflection, 0x45839e with 0x441dc8), colour mode 2 (0x45778e). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
    the ways' counts in the check's summary (which way is still the game's).
 2. A release for issue #1's reporter (ask for motorhead.log: both refresh rates).
 3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
@@ -112,7 +112,13 @@ All below is committed (250515c, 9f91d2a) and pushed, the lifter also in recomp_
   0x520f0c; with [0x739f2c] = 1 the face is drawn twice, 0x45896b, still the game's): rec8
   3000 checks, 0 differ; ways behind 371k, outside 510k, mode 1 2.63M, far 690k, mode 4
   884k, reflect 772k, the game's 142k (mode 1 cut 67k, mode 2 75k).
-  Next: mode 2 (0x45778e), the near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
+  Then mode 2 (0x45787b: base colour times the light of 0x455fb8, no light factor), and
+  modes 1, 2, 4 one way in the code (colours, fog, reflection or texture, finish): rec8 2048
+  checks, 0 differ; ways behind 368k, outside 408k, mode 1 1.01M, far 490k, mode 4 886k,
+  reflect 788k, mode 2 71k, the game's 74k (nearly all mode 1 cut at the near plane).
+  Not written: modes 2/4 with [+1] flag 0x10 (0x4577a1, 0x457b2e), modes 0 and 3, the
+  reflection drawn twice ([0x739f2c] = 1): none seen on rec8.
+  Next: the near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
   memory copy each): fine for a check, the window looks hung.
 - Then the depth read's remaining ~5% wait.
 

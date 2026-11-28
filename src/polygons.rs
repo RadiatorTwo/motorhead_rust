@@ -61,10 +61,12 @@ enum Way {
     Far,
     /// colour mode 4, close, not cut
     Mode4,
-    /// colour mode 4 with a reflection ([face+1] flag 1), close, not cut
+    /// colour mode 1, 2 or 4 with a reflection ([face+1] flag 1), close, not cut
     Reflect,
+    /// colour mode 2, close, not cut
+    Mode2,
 }
-static WAYS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+static WAYS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
 fn ours(c: &mut Cpu) {
     let way = run(c);
@@ -182,18 +184,47 @@ fn run(c: &mut Cpu) -> Way {
         ret(c, list, rec, n << 5, rec + 0xc0);
         return Way::Far;
     }
-    // 0x457049: the way of the most faces (colour mode 1, a point close, not cut at the near
-    // plane): 0x457f30 -> 0x457617 -> 0x457832 -> 0x458081 -> 0x4585ae -> 0x458909
+    // 0x457f30: colour mode 1, 2 or 4, a point close, not cut at the near plane (0x457617,
+    // 0x45778e, 0x457b1b; with [+1] flag 0x10 modes 2 and 4 go another way, 0x4577a1,
+    // 0x457b2e) -> 0x457832 (fog) -> 0x458081: a reflection ([+1] flag 1, 0x45839e; with
+    // [0x739f2c] = 1 drawn twice, 0x45896b) or the face's texture (0x4585ae; with [+1] flag 4
+    // a list by alpha, 0x458625) -> 0x458909
+    let reflect = f1 & 1 != 0;
     if m.rd32(obj + 0xa8) == 0
         && close != 0
-        && mode == 1
         && near_count == 0
-        && f1 & 1 == 0
-        && !(f0 & 2 != 0 && f1 & 4 != 0)
+        && match mode {
+            1 => true,
+            2 | 4 => f1 & 0x10 == 0,
+            _ => false,
+        }
+        && if reflect {
+            m.rd32(REFLECT_TWICE.at()) != 1
+        } else {
+            !(f0 & 2 != 0 && f1 & 4 != 0)
+        }
     {
-        colours_mode1(&fpu, face, rec, n);
+        let lit = Lit { face, obj, rec, ebx: entry[EBX] };
+        let way = match mode {
+            1 => {
+                colours_mode1(&fpu, face, rec, n);
+                Way::Mode1
+            }
+            2 => {
+                colours_mode2(c, &fpu, &lit, n);
+                Way::Mode2
+            }
+            _ => {
+                colours_mode4(c, &fpu, &lit, n);
+                Way::Mode4
+            }
+        };
+        c.r = entry;
         fog(&fpu, rec, n);
-        let list = if f0 & 2 != 0 {
+        let list = if reflect {
+            reflection(&fpu, face, obj, rec, n);
+            Us(0x520f0c).at()
+        } else if f0 & 2 != 0 {
             texture(rec, face, n);
             m.rd32(Us(0x520f04).at()) + 4 * m.rd32(face + 0x14)
         } else {
@@ -201,49 +232,7 @@ fn run(c: &mut Cpu) -> Way {
         };
         let head = finish(&fpu, rec, n, list);
         ret(c, face, rec, n, head);
-        return Way::Mode1;
-    }
-    // 0x457b1b: colour mode 4 (lit), close, not cut, the face without flags 0x10 and 1 in
-    // [+1]: 0x457bc4 -> 0x457cac -> 0x457832 -> 0x458081 -> 0x4585ae -> 0x458909
-    if m.rd32(obj + 0xa8) == 0
-        && close != 0
-        && mode == 4
-        && near_count == 0
-        && f1 & 0x11 == 0
-        && !(f0 & 2 != 0 && f1 & 4 != 0)
-    {
-        let lit = Lit { face, obj, rec, ebx: entry[EBX] };
-        colours_mode4(c, &fpu, &lit, n);
-        c.r = entry;
-        fog(&fpu, rec, n);
-        let list = if f0 & 2 != 0 {
-            texture(rec, face, n);
-            m.rd32(Us(0x520f04).at()) + 4 * m.rd32(face + 0x14)
-        } else {
-            Us(0x520f20).at()
-        };
-        let head = finish(&fpu, rec, n, list);
-        ret(c, face, rec, n, head);
-        return Way::Mode4;
-    }
-    // 0x457b1b with [face+1] flag 1 and [0x739f2c] != 1: the same colours, the reflection's
-    // texture and uvs instead of the face's: 0x457bc4 -> 0x457832 -> 0x458081 -> 0x45839e ->
-    // 0x45875e -> 0x458909 (-> 0x45895a: no second polygon)
-    if m.rd32(obj + 0xa8) == 0
-        && close != 0
-        && mode == 4
-        && near_count == 0
-        && f1 & 0x11 == 1
-        && m.rd32(REFLECT_TWICE.at()) != 1
-    {
-        let lit = Lit { face, obj, rec, ebx: entry[EBX] };
-        colours_mode4(c, &fpu, &lit, n);
-        c.r = entry;
-        fog(&fpu, rec, n);
-        reflection(&fpu, face, obj, rec, n);
-        let head = finish(&fpu, rec, n, Us(0x520f0c).at());
-        ret(c, face, rec, n, head);
-        return Way::Reflect;
+        return if reflect { Way::Reflect } else { way };
     }
     if check_every().is_some() {
         // which way the game's function goes on (for choosing what to write next)
@@ -367,6 +356,44 @@ fn colours_mode4(c: &mut Cpu, fpu: &Fpu, l: &Lit, n: u32) {
         let z = from_f32(fpu.f32_bits(z));
         m.wr32(at + 4, fpu.f32_bits(fpu.mul(y, ly)));
         m.wr32(at + 8, fpu.f32_bits(fpu.mul(z, lz)));
+        clamp(at, 0, 0x437f_0000);
+    }
+}
+
+const LIGHT_SHADE: Us = Us(0x455fb8);
+
+/// 0x45787b: colour mode 2: a base colour (as mode 4's, the constant one times [0x4fbc86])
+/// times the normals' light (0x455fb8 if not yet worked out); the first normal's, every
+/// normal's for a face with flag 8 or [+1] flag 1.
+fn colours_mode2(c: &mut Cpu, fpu: &Fpu, l: &Lit, n: u32) {
+    let m = win32::platform::mem();
+    let (f0, f1) = (m.rd8(l.face), m.rd8(l.face + 1));
+    let k = Us(0x4dc208).at();
+    let base = if f1 & 1 == 0 && f0 & 2 != 0 {
+        // 0x4578d3
+        let q = q64(Us(0x4fbc86).at());
+        [0, 1, 2].map(|j| fpu.f32_bits(fpu.mul(from_f32(m.rd32(k + 4 * j)), q)))
+    } else {
+        let bytes = m.rd32(l.face + 0x10);
+        [0, 1, 2]
+            .map(|j| fpu.f32_bits(fpu.mul(m.rd8(bytes + j) as f64, from_f32(m.rd32(k + 4 * j)))))
+    };
+    let each = (f0 & 8 != 0 || f1 & 1 != 0) && n > 1;
+    let normals = m.rd32(l.face + 0xc);
+    for j in 0..if each { n } else { 1 } {
+        let v = m.rd16(normals + 2 * j) as u32;
+        let a = LIGHT.at() + 12 * v;
+        if m.rd32(a) == 0xffff_ffff {
+            c.r[EAX] = a;
+            c.r[EDX] = m.rd32(l.obj + 0x94) + 12 * v;
+            c.r[EBX] = l.ebx;
+            win32::platform::guest_call(c, LIGHT_SHADE.at(), &[]);
+        }
+        let at = l.rec + 0x84 + 12 * j;
+        for i in 0..3 {
+            let v = fpu.mul(from_f32(base[i as usize]), from_f32(m.rd32(a + 4 * i)));
+            m.wr32(at + 4 * i, fpu.f32_bits(v));
+        }
         clamp(at, 0, 0x437f_0000);
     }
 }
@@ -566,7 +593,7 @@ fn checked(c: &mut Cpu) {
     if n.is_power_of_two() || n % 1000 == 0 {
         let w: Vec<u64> = WAYS.iter().map(|w| w.load(Relaxed)).collect();
         eprintln!(
-            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4, reflect) {w:?}",
+            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4, reflect, mode 2) {w:?}",
             DIFF.load(Relaxed)
         );
         let mut k: Vec<(u32, u64)> = KEYS.lock().unwrap().iter().map(|(&a, &b)| (a, b)).collect();
