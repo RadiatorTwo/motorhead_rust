@@ -10,7 +10,13 @@ Next, in this order:
    called from Rust). Done: the reflection (0x45839e), mode 2 (0x45778e), the near plane cut
    (0x458794). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
    the ways' counts in the check's summary (which way is still the game's).
-2. Issue #1: v0.3.3 out (2026-11-28); ask its reporter to try it and send motorhead.log (both refresh rates).
+2. Issue #1: v0.3.3 out (2026-11-28): its reporter has 120 fps (frame limit) on an i7-3770.
+   Reported there: the race's CD track not played again at its end. Fixed (frames.rs
+   `music_again`: the game's 0x41e63c called after each race frame; the game gates it on
+   [0x73ae18], which nothing writes, so also the original played the race's track once).
+   The menu (no such check in the game) the same after the mouse's poll 0x434170 (once a
+   menu frame). Tested with the length cut to 10 s (local only): race (rec8) track 4 and
+   menu track 3 again every 10 s.
 3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
 4. The depth read's remaining wait (~5%), then the next hot functions (0x4bc2f8 Glide_Scene,
    0x455e40, 0x414b68).

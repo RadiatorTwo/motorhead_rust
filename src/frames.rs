@@ -17,7 +17,7 @@
 //! picture, with the game's static data put back after it (`STATICS`). For now each picture
 //! shows the newest logic frame; interpolation between the last two comes next (step 3).
 
-use recomp::rt::{Cpu, ESP, call_original};
+use recomp::rt::{Cpu, EAX, ESP, call_original};
 use recomp::ver::Us;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -117,6 +117,27 @@ pub fn race_frame(c: &mut Cpu) {
     call_original(c, RACE_FRAME.at());
     if race_log() {
         FRAME_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+    music_again(c);
+}
+
+/// The game's check: the CD track's time is over, play it again (real time, [0x514034] +
+/// [0x514038]; eax and flags changed).
+const MUSIC_AGAIN: Us = Us(0x41e63c);
+/// The music's volume: 0 is off.
+const MUSIC_VOLUME: Us = Us(0x73ae14);
+/// The race frame calls the check only with this one non-zero too, which nothing in the game
+/// writes: the race's music played once and stopped (also in the original).
+const MUSIC_AGAIN_ON: Us = Us(0x73ae18);
+
+/// The CD track played again when it ends (after each race frame and each menu frame: the
+/// mouse's poll, `hooks.rs`).
+pub fn music_again(c: &mut Cpu) {
+    let m = mem();
+    if m.rd32(MUSIC_VOLUME.at()) != 0 && m.rd32(MUSIC_AGAIN_ON.at()) == 0 {
+        let eax = c.r[EAX];
+        guest_call(c, MUSIC_AGAIN.at(), &[]);
+        c.r[EAX] = eax;
     }
 }
 

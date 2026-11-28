@@ -41,3 +41,11 @@
 0x456d4c Render_Polygons  the 3D renderer's big loop (0x456d4c..0x458bec): faces of an object, their points through 0x414e54, ~25% of a race
 0x414e54 Project_Point  a point (edx) through the matrix (ebx) to the screen (eax: x, y, z, 1/w) with clip flags at [ecx] (1 left, 2 right, 4 top, 8 bottom, 0x10 too near, 0x20 behind); in Rust: src/project.rs (MOTORHEAD_CHECK_PROJECT=1 compares with the game's code)
 0x4c17d6 Watcom_Trunc  frndint with the rounding set to truncate (float to integer)
+0x41e2c0 CD_Open  MCI open of the CD audio device (once: [0x514028] = 1, device [0x514024])
+0x41e3fc CD_PlayTrack  al = track: MCI play of that track whole, without MCI_NOTIFY; [0x514030] track, [0x514034] start (ms, 0x4babbc), [0x514038] length (ms)
+0x41e5fc CD_Stop  MCI stop, [0x514030] = 0
+0x41e63c CD_Again  the track's time over (real time): CD_PlayTrack again; the race frame calls it only with [0x73ae14] and [0x73ae18] non-zero (frames.rs calls it after each race frame: [0x73ae18] is never written)
+0x4babbc Clock_RealMs  QueryPerformanceCounter in ms (double, st0)
+0x73ae14 g_music_volume  0 is off
+0x73ae18 g_music_again?  checked before CD_Again in the race frame, written nowhere (0 at a race)
+0x434170 Mouse_Poll  DirectInput mouse: movement into [0x51c56c], [0x51c570]; from 0x4c1738 (the cursor), once a menu frame (hooked: the menu's music again)

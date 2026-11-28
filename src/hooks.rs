@@ -30,8 +30,19 @@ pub fn all() -> Vec<(u32, Hook)> {
         (crate::sprites::DRAW_CLIPPED, crate::sprites::draw_clipped),
         (crate::sprites::DRAW_STEP, crate::sprites::draw_step),
         (crate::sprites::DRAW_LIST, crate::sprites::draw_list),
+        (MOUSE_POLL, mouse_poll),
     ];
     table.iter().map(|&(a, h)| (a.at(), h)).collect()
+}
+
+/// The mouse's DirectInput poll (movement into [0x51c56c], [0x51c570]), from the cursor's
+/// update 0x4c1738: once a frame in the menus.
+const MOUSE_POLL: Us = Us(0x434170);
+
+/// The menu's music played again at its end: the game has no such check outside the race.
+fn mouse_poll(c: &mut Cpu) {
+    recomp::rt::call_original(c, MOUSE_POLL.at());
+    crate::frames::music_again(c);
 }
 
 /// Watcom's runtime (number formatting): `call +x; <table>`, where x is `pop edi; ret`: edi =
