@@ -58,3 +58,9 @@
 0x486a44 Controls_Assign  [0x7ddbfc] state (1 calibrate, 10 wait for release, 2 wait for a new press, 3 for its release), [0x7ddbf8] focus (0 layouts, 1 tasks)
 0x737e74 g_menu_pad  1: the joystick works the menus; 0 in the control options' assignment
 0x47bb24 Menu_Step  the options screens' slider step a frame: frame ms x 0.07 (x2 Shift, x4 Ctrl, x0.5 Alt), st0; the mouse speed moves 0.03 a step (hooked: controls.rs, a tap 1%, then a pause, then ramped)
+0x4a9c74 Renderers_List  the renderers into a chain of 0x284-byte records (+0x54 name: cliff, Direct3D's, psgl, voodoo; +0x278/+0x27c resolutions, 0x34 bytes each; +0x280 next) (hooked: graphics.rs keeps voodoo)
+0x4bb480 Glide_Modes  Glide's resolutions (0x4f1d74: 512x384..1024x768) (hooked: graphics.rs, the port's)
+0x4bb5f4 Glide_Open  grSstWinOpen for a resolution record (edx), one of the table 0x4f1cb4 (w, h, GR_RESOLUTION) (hooked: always 1024x768)
+0x7d92d0 menu_modes  the graphics menu's resolutions: number, records, chosen index; config [0x7d8ac8] +0xaa4/+0xaa8 ScreenDimension
+0x4840c8 Renderer_Changed  the Render device row changed: the new renderer's resolution nearest the chosen one by |dw*dh| (hooked: the same one kept)
+0x4c21bc sprintf  Watcom's (cdecl); the graphics menu's resolution labels with "%4ldx%-4ld" 0x4fe7a9 (hooked: "Fullscreen")

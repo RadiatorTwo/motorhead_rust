@@ -200,6 +200,20 @@ const SIZES: [(u32, u32); 11] = [
     (3840, 2160),
 ];
 
+/// The resolutions the Resolution row offers besides Auto: those of `SIZES` that fit a display
+/// of `display`, and the chosen one (a game's own resolution list can show the same).
+pub fn resolutions(display: (u32, u32)) -> Vec<(u32, u32)> {
+    let mut v: Vec<(u32, u32)> = SIZES
+        .iter()
+        .copied()
+        .filter(|&(w, h)| w <= display.0 && h <= display.1)
+        .collect();
+    if let Some(cur) = display::chosen().filter(|cur| !v.contains(cur)) {
+        v.push(cur);
+    }
+    v
+}
+
 /// What the window does for a change.
 pub enum Action {
     Fullscreen(bool),
@@ -251,16 +265,7 @@ impl Menu {
 
     fn sizes(&self) -> Vec<Option<(u32, u32)>> {
         let mut v = vec![None];
-        v.extend(
-            SIZES
-                .iter()
-                .filter(|&&(w, h)| w <= self.display.0 && h <= self.display.1)
-                .map(|&z| Some(z)),
-        );
-        let cur = display::chosen();
-        if !v.contains(&cur) {
-            v.push(cur);
-        }
+        v.extend(resolutions(self.display).into_iter().map(Some));
         v
     }
 

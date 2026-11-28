@@ -31,6 +31,11 @@ pub fn all() -> Vec<(u32, Hook)> {
         (crate::sprites::DRAW_STEP, crate::sprites::draw_step),
         (crate::sprites::DRAW_LIST, crate::sprites::draw_list),
         (MOUSE_POLL, mouse_poll),
+        (crate::graphics::RENDERERS, crate::graphics::renderers),
+        (crate::graphics::GLIDE_MODES, crate::graphics::glide_modes),
+        (crate::graphics::GLIDE_OPEN, crate::graphics::glide_open),
+        (crate::graphics::RENDERER_CHANGED, crate::graphics::renderer_changed),
+        (crate::graphics::SPRINTF, crate::graphics::label),
         (crate::controls::JOY_POLL, crate::controls::joy_poll),
         (crate::controls::KEY_NAME, crate::controls::key_name),
         (crate::controls::MENU_STEP, crate::controls::menu_step),
@@ -43,10 +48,11 @@ pub fn all() -> Vec<(u32, Hook)> {
 const MOUSE_POLL: Us = Us(0x434170);
 
 /// The menu's music played again at its end (the game has no such check outside the race);
-/// the mouse turned off in the menus (`controls`).
+/// the mouse turned off in the menus (`controls`); the resolution kept the port's (`graphics`).
 fn mouse_poll(c: &mut Cpu) {
     recomp::rt::call_original(c, MOUSE_POLL.at());
     crate::controls::mouse_polled();
+    crate::graphics::sync(c);
     crate::frames::music_again(c);
 }
 
