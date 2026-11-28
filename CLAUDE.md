@@ -86,6 +86,8 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
   then). `src/fpu.rs`: x87 rounding as the lifter does it, for such code.
 - `src/pad.rs` the pad in a race (analog steering, gas, brake), `src/controls.rs`
   the pad and mouse in the game's menus and its control options (key array 0x51c3d4).
+- `src/graphics.rs` the game's graphic options: only Glide offered, the port's resolutions in
+  its Screen size list (kept the same as F10's), Glide always opened at 1024x768.
 - `src/loaded.rs` the interpreter for loaded code; `src/font.rs`, `src/sprites.rs` the
   replaced drawers (each the game's loop, registers carried as in the original).
 - Framework changes made here (not yet in recomp_kit, see PLAN.md "Kit"): Watcom sections

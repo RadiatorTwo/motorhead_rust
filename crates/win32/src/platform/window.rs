@@ -971,6 +971,17 @@ pub fn window_size() -> (u32, u32) {
     })
 }
 
+/// The size of the display the window is on (None before the window is there).
+pub fn display_size() -> Option<(u32, u32)> {
+    if !on_main() {
+        return None;
+    }
+    with_host(|h| {
+        let m = h.app.window.as_ref()?.current_monitor()?;
+        Some((m.size().width, m.size().height))
+    })
+}
+
 /// The display the window is on: its size and the sizes of its video modes (largest first,
 /// at least 640x480).
 pub fn display_modes() -> ((u32, u32), Vec<(u32, u32)>) {

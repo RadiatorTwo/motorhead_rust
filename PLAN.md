@@ -268,6 +268,18 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
   `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
   gives 40 mph where full gives 117. The user: menu with A works, analog fine; steering squared (linear was twitchy).
+- [x] the game's graphic options (2026-11-28, `graphics.rs`): Render device only Glide (the
+  renderer chain of 0x4a9c74 without cliff/Direct3D/psgl); Screen size lists the F10 menu's
+  resolutions (`options::resolutions`: those that fit the display, the chosen one) instead of
+  Glide's five; the menu's choice ([0x7d92d8]) is the port's resolution both ways (`sync` in
+  the mouse poll: a change in the menu resizes the window like F10, an F10 change moves the
+  menu's). The game itself always opens Glide at 1024x768 (its coordinates; drawn at the
+  port's size). Checked: list 9 entries on 2560x1440, 1600x900 chosen in the menu resized the
+  window and wrote RenderSize, the demo then raced in 1600x900. Seen in that run's stderr:
+  "Domain error in acos" during the demo (not known if new; the race path is unchanged).
+  Then: the list's last entry "Fullscreen" (the display's size; the label through the game's
+  sprintf), the others a window; the Render device row (0x4840c8 took the "nearest"
+  resolution by |dw*dh|, so 1920x1080 became 1440x1080) keeps the chosen one. Checked both.
 - [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27), v0.3.3 (2026-11-28)
 - [x] Linux under Wayland hung at the loading screen (2026-11-27): EGL lets the window's
   surface be current in one thread only; the present thread's shared context got

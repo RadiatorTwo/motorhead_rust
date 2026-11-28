@@ -19,6 +19,7 @@ mod controls;
 mod project;
 mod fpu;
 mod polygons;
+mod graphics;
 
 use recomp::smc::SmcSpec;
 use recomp::ver::Version;
