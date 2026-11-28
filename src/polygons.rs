@@ -65,8 +65,10 @@ enum Way {
     Reflect,
     /// colour mode 2, close, not cut
     Mode2,
+    /// colour mode 1, 2 or 4, cut at the near plane
+    Cut,
 }
-static WAYS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static WAYS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
 
 fn ours(c: &mut Cpu) {
     let way = run(c);
@@ -166,7 +168,6 @@ fn run(c: &mut Cpu) -> Way {
         ret(c, n, ebx, ecx, n);
         return Way::Outside;
     }
-    let _ = flags;
     let f1 = m.rd8(face + 1);
     let mode = entry[ECX];
     // 0x4574d2: no point close (and the detail not low): no colours, alpha by depth
@@ -192,7 +193,7 @@ fn run(c: &mut Cpu) -> Way {
     let reflect = f1 & 1 != 0;
     if m.rd32(obj + 0xa8) == 0
         && close != 0
-        && near_count == 0
+        && (near_count == 0 || !reflect)
         && match mode {
             1 => true,
             2 | 4 => f1 & 0x10 == 0,
@@ -230,6 +231,14 @@ fn run(c: &mut Cpu) -> Way {
         } else {
             Us(0x520f20).at()
         };
+        if near_count != 0 {
+            // 0x458794
+            cut(c, &fpu, face, rec, n, list, flags);
+            let r = c.r;
+            c.r = entry;
+            ret(c, r[EAX], r[EBX], r[ECX], r[EDX]);
+            return Way::Cut;
+        }
         let head = finish(&fpu, rec, n, list);
         ret(c, face, rec, n, head);
         return if reflect { Way::Reflect } else { way };
@@ -468,6 +477,62 @@ fn texture(rec: u32, face: u32, n: u32) {
     }
 }
 
+const CLIP_NEAR: Us = Us(0x4566b8);
+
+/// 0x4587a2: a polygon with points beyond the near plane (clip flag 0x10): those points as
+/// projected with 1/w 0, the others back from the screen (x, y about the screen's centre
+/// [0x521298], [0x52129c]; z times [0x52127c]); then 0x4566b8 cuts it at the near plane and
+/// puts the pieces in `list` (registers as it leaves them).
+fn cut(c: &mut Cpu, fpu: &Fpu, face: u32, rec: u32, n: u32, list: u32, flags: [u8; 4]) {
+    let m = win32::platform::mem();
+    let count = Us(0x520fcc).at();
+    m.wr32(count, m.rd32(count).wrapping_add(1));
+    let e = |a: u32| from_f32(m.rd32(Us(a).at()));
+    let (kz, k2, kx, ky) = (e(0x52127c), e(0x521284), e(0x5212a4), e(0x5212ac));
+    let (cx, cy) = (e(0x521298), e(0x52129c));
+    let points = m.rd32(face + 8);
+    // ecx as the loop leaves it (0x4566b8 gives it back)
+    let mut ecx = c.r[ECX];
+    for k in 0..n {
+        let v = m.rd16(points + 2 * k) as u32;
+        let p = PROJECTED.at() + 16 * v;
+        let at = rec + 0x20 * k;
+        if m.rd32(CLIP.at() + 4 * v) & 0x10 != 0 {
+            ecx = rec;
+            m.wr32(at + 4, m.rd32(p));
+            m.wr32(at + 8, m.rd32(p + 4));
+            m.wr32(at + 0xc, m.rd32(p + 8));
+            m.wr32(at + 0x10, 0);
+            continue;
+        }
+        // 0x458826
+        let z = fpu.mul(from_f32(m.rd32(p + 8)), kz);
+        let f = fpu.mul(z, k2);
+        let a = fpu.sub(from_f32(m.rd32(p)), cx);
+        let g = fpu.mul(f, kx);
+        let x = fpu.mul(a, g);
+        let b = from_f32(fpu.f32_bits(fpu.sub(cy, from_f32(m.rd32(p + 4)))));
+        let h = fpu.mul(g, ky);
+        let y = fpu.mul(h, b);
+        m.wr32(at + 4, fpu.f32_bits(x));
+        m.wr32(at + 8, fpu.f32_bits(y));
+        m.wr32(at + 0xc, fpu.f32_bits(z));
+        ecx = m.rd32(p + 12);
+        m.wr32(at + 0x10, ecx);
+    }
+    // the clip flags' low bytes, as the game's [esp+70] (a triangle's fourth is not read)
+    let at = c.r[ESP] - 0x100;
+    for (k, &f) in flags.iter().enumerate() {
+        m.wr8(at + k as u32, if (k as u32) < n { f } else { 0 });
+    }
+    m.wr32(LIST.at(), list);
+    c.r[EAX] = POLYGON.at();
+    c.r[ECX] = ecx;
+    c.r[EDX] = list;
+    c.r[EBX] = at;
+    win32::platform::guest_call(c, CLIP_NEAR.at(), &[0]);
+}
+
 /// 1: a reflecting face is drawn twice (its colours, then the reflection: 0x458092,
 /// 0x45896b)
 const REFLECT_TWICE: Us = Us(0x739f2c);
@@ -593,7 +658,7 @@ fn checked(c: &mut Cpu) {
     if n.is_power_of_two() || n % 1000 == 0 {
         let w: Vec<u64> = WAYS.iter().map(|w| w.load(Relaxed)).collect();
         eprintln!(
-            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4, reflect, mode 2) {w:?}",
+            "polygons check: {n} checks, {} differ; ways (behind, outside, game, mode 1, far, mode 4, reflect, mode 2, cut) {w:?}",
             DIFF.load(Relaxed)
         );
         let mut k: Vec<(u32, u64)> = KEYS.lock().unwrap().iter().map(|(&a, &b)| (a, b)).collect();

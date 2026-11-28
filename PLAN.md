@@ -3,10 +3,12 @@
 ## Now (2026-11-28): frame rate (issue #1)
 
 Next, in this order:
-1. 0x456d4c's remaining ways in Rust (`src/polygons.rs`, see the entry below): the near
-   plane cut (0x458794, 0x4566b8: nearly all the game's calls left, ~74k of rec8's 2048-check
-   run), [obj+0xa8] != 0 (0x45705d), the low detail level. Done: colour mode 4 with [face+1]
-   flag 1 (the reflection, 0x45839e with 0x441dc8), colour mode 2 (0x45778e). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
+1. 0x456d4c's remaining ways in Rust (`src/polygons.rs`, see the entry below): a textured
+   face with [+1] flag 4 (the list by alpha, 0x458625), modes 2/4 with [+1] flag 0x10
+   (0x4577a1, 0x457b2e), the reflection cut at the near plane (0x458433), [obj+0xa8] != 0
+   (0x45705d), the low detail level; maybe the cutter 0x4566b8 itself (still the game's,
+   called from Rust). Done: the reflection (0x45839e), mode 2 (0x45778e), the near plane cut
+   (0x458794). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
    the ways' counts in the check's summary (which way is still the game's).
 2. A release for issue #1's reporter (ask for motorhead.log: both refresh rates).
 3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
@@ -118,7 +120,12 @@ All below is committed (250515c, 9f91d2a) and pushed, the lifter also in recomp_
   reflect 788k, mode 2 71k, the game's 74k (nearly all mode 1 cut at the near plane).
   Not written: modes 2/4 with [+1] flag 0x10 (0x4577a1, 0x457b2e), modes 0 and 3, the
   reflection drawn twice ([0x739f2c] = 1): none seen on rec8.
-  Next: the near plane (0x458794, 0x4566b8). A check every 2000th call makes the game very slow (a
+  Then the near plane cut (`cut`, 0x4587a2: the points not beyond it back from the screen,
+  then the game's 0x4566b8 called with the clip flags' bytes, ecx as the loop leaves it, the
+  list written first): rec8 1024 checks, 0 differ; ways behind 125k, outside 194k, mode 1
+  584k, far 268k, mode 4 408k, reflect 432k, mode 2 2k, cut 20k, the game's 12k (this run
+  went another way through the menu: the list by alpha 8.5k, mode 2 flag 0x10 3.6k, the
+  reflection cut 0.3k). A check every 2000th call makes the game very slow (a
   memory copy each): fine for a check, the window looks hung.
 - Then the depth read's remaining ~5% wait.
 
