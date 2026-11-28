@@ -1,6 +1,6 @@
-//! The x87 cache carried over jumps (`x87_edge`): loops shaped like the game's, recompiled
-//! with the cache over jumps and without, give the same memory and x87 registers. Needs no
-//! game files.
+//! Loops shaped like Motorhead's (Watcom), recompiled with the x87 cache (`lift::X87_CACHE`)
+//! and without, give the same memory and x87 registers; they compile at all (Cranelift's
+//! verifier: a cached value used where it was not made). Needs no game files.
 
 mod common;
 
@@ -123,13 +123,8 @@ const SNIPPETS: [(&str, Snippet); 3] = [
     ("overlap", overlap),
 ];
 
-fn run(k: usize, seed: u64, cw: u16, carry: bool) -> (Vec<u8>, Vec<u64>) {
-    // (the switch is read when lifting)
-    if carry {
-        unsafe { std::env::remove_var("RECOMP_NO_CARRY87") };
-    } else {
-        unsafe { std::env::set_var("RECOMP_NO_CARRY87", "1") };
-    }
+fn run(k: usize, seed: u64, cached: bool) -> (Vec<u8>, Vec<u64>) {
+    recomp::lift::X87_CACHE.store(cached, std::sync::atomic::Ordering::Relaxed);
     let g = Guest::new(&SNIPPETS);
     let m = &g.mem;
     let mut rng = Rng(seed);
@@ -142,7 +137,6 @@ fn run(k: usize, seed: u64, cw: u16, carry: bool) -> (Vec<u8>, Vec<u64>) {
     for j in 64..256 {
         m.wr32(SCRATCH + 4 * j, 0);
     }
-    let _ = cw;
     let cpu = g.call(k, &[SCRATCH]);
     (
         m.slice(SCRATCH, 1024).to_vec(),
@@ -151,13 +145,13 @@ fn run(k: usize, seed: u64, cw: u16, carry: bool) -> (Vec<u8>, Vec<u64>) {
 }
 
 #[test]
-fn x87_carry() {
+fn x87_loops() {
     let mut rng = Rng(0x5851_f42d_4c95_7f2d);
     for n in 0..200 {
         let seed = rng.next();
         for k in 0..SNIPPETS.len() {
-            let a = run(k, seed, 0x37f, false);
-            let b = run(k, seed, 0x37f, true);
+            let a = run(k, seed, false);
+            let b = run(k, seed, true);
             assert!(a.0 == b.0, "snippet {k}, data {n}: memory differs");
             assert!(a.1 == b.1, "snippet {k}, data {n}: x87 registers differ");
         }

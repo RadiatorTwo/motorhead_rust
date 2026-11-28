@@ -18,7 +18,6 @@ use cranelift_codegen::ir::{
     Endianness, InstBuilder, Value, condcodes::FloatCC, condcodes::IntCC, types::*,
 };
 use iced_x86::{Instruction, MemorySize, Mnemonic, OpKind, Register};
-use std::collections::HashMap;
 use std::mem::offset_of;
 
 const C0: i64 = 0x100;
@@ -129,29 +128,12 @@ pub struct Cache {
     pub enabled: bool,
     /// TOP minus TOP at the run's start
     d: i64,
+    /// TOP as read once in the run, and `d` then: every later TOP and slot is that value plus
+    /// a constant (a chain of `(top + 1) & 7` per fld and fstp cost a dependent add and mask
+    /// each; only the last TOP of the run is used)
+    pub(super) base: Option<(Value, i64)>,
     /// by place relative to TOP at the run's start: the value, and whether memory lacks it
     vals: [Option<(Value, bool)>; 8],
-    /// the control word (I16; memory has it too): one value along the run, so the rounding
-    /// mode's tests are made once, not at every operation
-    cw: Option<Value>,
-    /// the control word's tests for the arithmetic (`Mode`), made where the run is
-    mode: Option<Mode>,
-    /// what each join gets in the variables `Lifter::xv` / `xcw`: fixed by the first jump
-    /// lifted to it (or nothing if the join is lifted first), the others give the same
-    into: HashMap<u32, Carry>,
-}
-
-impl Cache {
-    pub fn carry_nothing(&mut self, a: u32) {
-        self.into.insert(a, Carry::default());
-    }
-}
-
-/// The x87 cache at a join: ST(i) carried (and whether memory lacks it), the control word.
-#[derive(Clone, Copy, Default)]
-struct Carry {
-    st: [Option<bool>; 8],
-    cw: bool,
 }
 
 /// What the control word says for the arithmetic's rounding.
@@ -182,8 +164,7 @@ impl Lifter<'_, '_> {
         }
         self.xc.vals = [None; 8];
         self.xc.d = 0;
-        self.xc.cw = None;
-        self.xc.mode = None;
+        self.xc.base = None;
         self.usual87 = false;
         self.near24 = false;
         // the end of a run's 0xc7f version: the SSE rounding as it was
@@ -192,127 +173,16 @@ impl Lifter<'_, '_> {
         }
     }
 
-    /// Forget the cache (at code reached by jumps only: what it held is theirs).
-    pub(super) fn x87_forget(&mut self) {
-        debug_assert!(self.rz.is_none() && !self.usual87 && !self.near24);
-        self.xc.vals = [None; 8];
-        self.xc.d = 0;
-        self.xc.cw = None;
-        self.xc.mode = None;
-    }
-
-    /// Before a jump to `tgt`: a join inside the function gets the cache in the variables
-    /// `xv` (ST(i), relative to TOP, which the jumps agree on whatever their way) as its
-    /// first lifted jump had it; memory is made to have what the join does not carry or
-    /// carries as written. Outside the function: memory has it all. The way on to straight
-    /// code (reached from here only) keeps the cache as it is.
-    pub(super) fn x87_edge(&mut self, tgt: u32) {
-        if !self.xc.enabled {
-            return;
-        }
-        let inside = self.f.inside(tgt) && self.blocks.contains_key(&tgt);
-        if inside && !self.joins.contains(&tgt) {
-            return;
-        }
-        if !self.carry87() {
-            self.x87_settle();
-            return;
-        }
-        // a run's version ends here (its jump to the join): what is loaded for the join
-        // below must not stay in the cache for the next version, lifted after it
-        let version = self.rz.is_some() || self.usual87 || self.near24;
-        if version {
-            self.x87_settle();
-        }
-        let want = if inside {
-            let now = Carry {
-                st: std::array::from_fn(|i| self.xc.vals[self.place(i as u32)].map(|v| v.1)),
-                // (always: a loop's operations then do not read it from memory in each pass)
-                cw: true,
-            };
-            *self.xc.into.entry(tgt).or_insert(now)
-        } else {
-            Carry::default()
-        };
-        for i in 0..8u32 {
-            let r = self.place(i);
-            if let Some((v, true)) = self.xc.vals[r]
-                && want.st[i as usize] != Some(true)
-            {
-                let p = self.slot(i);
-                self.b.ins().store(mf(), v, p, offset_of!(Cpu, st) as i32);
-                self.xc.vals[r] = Some((v, false));
-            }
-            if want.st[i as usize].is_some() {
-                let v = self.st(i);
-                self.b.def_var(self.xv[i as usize], v);
-            }
-        }
-        if want.cw {
-            let v = self.fcw();
-            self.b.def_var(self.xcw, v);
-        }
-        if version {
-            self.x87_forget();
-        }
-    }
-
-    /// Whether the cache goes over jumps (`x87_edge`) in this function.
-    /// (`<PREFIX>_NO_CARRY87`: written back before every jump, as before)
-    pub(super) fn carry87(&self) -> bool {
-        self.xc.enabled && crate::config::env("NO_CARRY87").is_none()
-    }
-
-    /// At a join: the cache as the jumps to it carry it (`x87_edge`).
-    pub(super) fn x87_join(&mut self, a: u32) {
-        if !self.carry87() {
-            return;
-        }
-        self.x87_forget();
-        let c = *self.xc.into.entry(a).or_default();
-        for i in 0..8 {
-            if let Some(dirty) = c.st[i] {
-                let v = self.b.use_var(self.xv[i]);
-                self.xc.vals[i] = Some((v, dirty));
-            }
-        }
-        if c.cw {
-            self.xc.cw = Some(self.b.use_var(self.xcw));
-        }
-    }
-
+    /// The control word's tests for the arithmetic, from the variables `set_fcw` made.
     fn mode(&mut self) -> Mode {
-        if let Some(m) = self.xc.mode.filter(|_| self.xc.enabled) {
-            return m;
-        }
         let cw = self.fcw();
-        let cw = self.b.ins().uextend(I32, cw);
-        // rounding control 00 (to nearest) and precision control 1x (53 or 64 bits)
-        let m = self.b.ins().band_imm_u(cw, 0xe00);
-        let usual = self.b.ins().icmp_imm_u(IntCC::Equal, m, 0x200);
-        let pcrc = self.b.ins().band_imm_u(cw, 0xf00);
-        let trunc = self.b.ins().icmp_imm_u(IntCC::Equal, pcrc, 0xc00);
-        let near = self.b.ins().icmp_imm_u(IntCC::Equal, pcrc, 0);
-        let near_or_trunc = self.b.ins().bor(near, trunc);
-        let half = self.iconst(I64, 1 << 28);
-        let zero = self.iconst(I64, 0);
-        let add = self.b.ins().select(near, half, zero);
-        // stored (nothing reads them): made here once, not again in every operation's block
-        // (Cranelift makes a pure value where it is first used; the operations' blocks do not
-        // dominate each other)
-        let flag = self.b.ins().uextend(I64, near_or_trunc);
-        let at = offset_of!(Cpu, x87_mode) as i32;
-        self.b.ins().store(mf(), add, self.cpu, at);
-        self.b.ins().store(mf(), flag, self.cpu, at + 8);
-        let m = Mode {
-            cw,
-            usual,
-            near_or_trunc,
-            near,
-            add,
-        };
-        self.xc.mode = Some(m);
-        m
+        Mode {
+            cw: self.b.ins().uextend(I32, cw),
+            usual: self.b.use_var(self.mode_vars[0]),
+            near_or_trunc: self.b.use_var(self.mode_vars[1]),
+            add: self.b.use_var(self.mode_vars[2]),
+            near: self.b.use_var(self.mode_vars[3]),
+        }
     }
 
     /// The mode in a run's version for 24 bits to nearest (`Lifter::near24`): known but for
@@ -324,22 +194,39 @@ impl Lifter<'_, '_> {
             cw,
             usual: self.iconst(I8, 0),
             near_or_trunc: self.iconst(I8, 1),
-            near: self.iconst(I8, 1),
             add: self.iconst(I64, 1 << 28),
+            near: self.iconst(I8, 1),
         }
     }
 
-    /// The control word (I16).
+    /// The control word (I16; a variable, `Lifter::fcw`).
     pub(super) fn fcw(&mut self) -> Value {
-        if let Some(v) = self.xc.cw.filter(|_| self.xc.enabled) {
-            return v;
+        self.b.use_var(self.fcw)
+    }
+
+    /// A new control word (I16, in memory too): it and its tests for the arithmetic (`Mode`)
+    /// in variables, made where it changes (at the function's start, after calls, fldcw), not
+    /// at every operation or join. What no operation reads, Cranelift leaves out.
+    pub(super) fn set_fcw(&mut self, cw: Value) {
+        self.b.def_var(self.fcw, cw);
+        let cw = self.b.ins().uextend(I32, cw);
+        // rounding control 00 (to nearest) and precision control 1x (53 or 64 bits)
+        let m = self.b.ins().band_imm_u(cw, 0xe00);
+        let usual = self.b.ins().icmp_imm_u(IntCC::Equal, m, 0x200);
+        let pcrc = self.b.ins().band_imm_u(cw, 0xf00);
+        let trunc = self.b.ins().icmp_imm_u(IntCC::Equal, pcrc, 0xc00);
+        let near = self.b.ins().icmp_imm_u(IntCC::Equal, pcrc, 0);
+        let near_or_trunc = self.b.ins().bor(near, trunc);
+        let half = self.iconst(I64, 1 << 28);
+        let zero = self.iconst(I64, 0);
+        let add = self.b.ins().select(near, half, zero);
+        for (var, v) in self
+            .mode_vars
+            .into_iter()
+            .zip([usual, near_or_trunc, add, near])
+        {
+            self.b.def_var(var, v);
         }
-        let v = self
-            .b
-            .ins()
-            .load(I16, mf(), self.cpu, offset_of!(Cpu, fcw) as i32);
-        self.xc.cw = Some(v);
-        v
     }
 
     fn place(&self, k: u32) -> usize {
@@ -349,13 +236,7 @@ impl Lifter<'_, '_> {
     // ---- the register stack --------------------------------------------------------------
     /// Host pointer to the physical slot of ST(k), as a byte offset into the 8-entry arrays.
     fn slot(&mut self, k: u32) -> Value {
-        let t = self.b.use_var(self.top);
-        let t = if k == 0 {
-            t
-        } else {
-            self.b.ins().iadd_imm_s(t, k as i64)
-        };
-        let t = self.b.ins().band_imm_u(t, 7);
+        let t = self.top_plus(k as i64);
         let t = self.b.ins().uextend(I64, t);
         let t = self.b.ins().ishl_imm_u(t, 3);
         self.b.ins().iadd(self.cpu, t)
@@ -383,11 +264,41 @@ impl Lifter<'_, '_> {
         let p = self.slot(k);
         self.b.ins().store(mf(), v, p, offset_of!(Cpu, st) as i32);
     }
+    /// (TOP + k) & 7 (I32). In a cached run from the TOP read once (`Cache::base`).
+    fn top_plus(&mut self, k: i64) -> Value {
+        let (t, k) = if self.xc.enabled {
+            let (base, at) = match self.xc.base {
+                Some(b) => b,
+                None => {
+                    let b = (self.b.use_var(self.top), self.xc.d);
+                    self.xc.base = Some(b);
+                    b
+                }
+            };
+            (base, self.xc.d - at + k)
+        } else {
+            (self.b.use_var(self.top), k)
+        };
+        let t = if k == 0 {
+            t
+        } else {
+            self.b.ins().iadd_imm_s(t, k)
+        };
+        self.b.ins().band_imm_u(t, 7)
+    }
     fn add_top(&mut self, d: i64) {
+        if self.xc.enabled && self.xc.base.is_none() {
+            // read TOP before it moves
+            self.top_plus(0);
+        }
         self.xc.d += d;
-        let t = self.b.use_var(self.top);
-        let t = self.b.ins().iadd_imm_s(t, d);
-        let t = self.b.ins().band_imm_u(t, 7);
+        let t = if self.xc.enabled {
+            self.top_plus(0)
+        } else {
+            let t = self.b.use_var(self.top);
+            let t = self.b.ins().iadd_imm_s(t, d);
+            self.b.ins().band_imm_u(t, 7)
+        };
         self.b.def_var(self.top, t);
     }
     fn fpush(&mut self, v: Value) {
@@ -416,15 +327,12 @@ impl Lifter<'_, '_> {
         }
     }
 
+    /// The status word (a variable, `Lifter::fsw`).
     fn fsw(&mut self) -> Value {
-        self.b
-            .ins()
-            .load(I16, mf(), self.cpu, offset_of!(Cpu, fsw) as i32)
+        self.b.use_var(self.fsw)
     }
     fn set_fsw(&mut self, v: Value) {
-        self.b
-            .ins()
-            .store(mf(), v, self.cpu, offset_of!(Cpu, fsw) as i32);
+        self.b.def_var(self.fsw, v);
     }
 
     // ---- memory operands -------------------------------------------------------------------
@@ -553,6 +461,9 @@ impl Lifter<'_, '_> {
             self.b.create_block(),
         );
         self.b.append_block_param(done, F64);
+        // the rare ways at the function's end: the common ones stay close together
+        self.b.set_cold_block(edge);
+        self.b.set_cold_block(call_blk);
         if self.near24 {
             self.b.ins().jump(slow, &[]);
         } else {
@@ -622,7 +533,14 @@ impl Lifter<'_, '_> {
     /// 24-bit numbers: 53 >= 2 * 24 + 2), if the result is a float's normal number (the FPU
     /// keeps its wider exponent). (done, the result.) The general way (`round24_between`)
     /// took ~60 instructions an operation; Motorhead's renderer runs under 0x07f.
-    fn floats(&mut self, op: FpuOp, x: Value, y: Value, fast: Value, near: Value) -> (Value, Value) {
+    fn floats(
+        &mut self,
+        op: FpuOp,
+        x: Value,
+        y: Value,
+        fast: Value,
+        near: Value,
+    ) -> (Value, Value) {
         const LOW: i64 = (1 << 29) - 1;
         let xb = self.b.ins().bitcast(I64, mf(), x);
         let low = self.b.ins().band_imm_u(xb, LOW);
@@ -640,10 +558,11 @@ impl Lifter<'_, '_> {
         // bits than the FPU) and the float finite (not rounded up beyond the largest)
         let bits = self.b.ins().bitcast(I64, mf(), fast);
         let mag = self.b.ins().band_imm_u(bits, i64::MAX);
-        let normal = self
-            .b
-            .ins()
-            .icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, mag, 0x3810_0000_0000_0000);
+        let normal = self.b.ins().icmp_imm_u(
+            IntCC::UnsignedGreaterThanOrEqual,
+            mag,
+            0x3810_0000_0000_0000,
+        );
         let rb = self.b.ins().bitcast(I32, mf(), r32);
         let rmag = self.b.ins().band_imm_u(rb, 0x7fff_ffff);
         let finite = self
@@ -701,6 +620,9 @@ impl Lifter<'_, '_> {
             self.b.create_block(),
         );
         self.b.append_block_param(done, F64);
+        // the rare ways at the function's end (see `arith`)
+        self.b.set_cold_block(other);
+        self.b.set_cold_block(call_blk);
         self.b.ins().brif(normal, done, &[r.into()], other, &[]);
         // zero: exact unless a product or quotient of nonzero numbers came out below the
         // doubles' range (a sum of doubles is zero only if exact)
@@ -1177,8 +1099,7 @@ impl Lifter<'_, '_> {
                 self.b
                     .ins()
                     .store(mf(), v, self.cpu, offset_of!(Cpu, fcw) as i32);
-                self.xc.cw = Some(v);
-                self.xc.mode = None;
+                self.set_fcw(v);
             }
             Fnclex => {
                 let sw = self.fsw();
@@ -1191,8 +1112,7 @@ impl Lifter<'_, '_> {
                 self.b
                     .ins()
                     .store(mf(), cw, self.cpu, offset_of!(Cpu, fcw) as i32);
-                self.xc.cw = Some(cw);
-                self.xc.mode = None;
+                self.set_fcw(cw);
                 let z = self.iconst(I16, 0);
                 self.set_fsw(z);
                 let z = self.iconst(I32, 0);

@@ -279,6 +279,14 @@ pub struct Lifter<'a, 'f> {
     of: Variable,
     /// x87 TOP (0..7)
     top: Variable,
+    /// x87 status word (I16, TOP's bits not kept): in memory only across calls and exits, so
+    /// a compare's condition codes read by fnstsw and a test stay in registers, and what
+    /// nobody reads is not made
+    fsw: Variable,
+    /// x87 control word (I16, in memory too) and its tests for the arithmetic (`x87::Mode`:
+    /// usual, near_or_trunc, add), see `set_fcw`
+    fcw: Variable,
+    mode_vars: [Variable; 4],
     cfg: TargetFrontendConfig,
     blocks: HashMap<u32, Block>,
     /// blocks that leave the function towards an address
@@ -288,9 +296,6 @@ pub struct Lifter<'a, 'f> {
     pub missing: Vec<String>,
     /// the x87 registers in Cranelift values (see `x87::Cache`)
     xc: x87::Cache,
-    /// ST(0..7) and the control word carried by the x87 cache to a join (`x87_edge`)
-    xv: [Variable; 8],
-    xcw: Variable,
     /// instructions reached otherwise than from the one before (the cache is empty there)
     joins: std::collections::HashSet<u32>,
     /// while lifting a straight run's version for the control word 0xc7f (see `versions`):
@@ -340,8 +345,14 @@ impl<'a, 'f> Lifter<'a, 'f> {
             b.declare_var(I8),
         );
         let top = b.declare_var(I32);
-        let xv = std::array::from_fn(|_| b.declare_var(F64));
-        let xcw = b.declare_var(I16);
+        let fsw = b.declare_var(I16);
+        let fcw = b.declare_var(I16);
+        let mode_vars = [
+            b.declare_var(I8),
+            b.declare_var(I8),
+            b.declare_var(I64),
+            b.declare_var(I8),
+        ];
         let mut l = Lifter {
             b,
             f,
@@ -359,14 +370,15 @@ impl<'a, 'f> Lifter<'a, 'f> {
             sf,
             of,
             top,
+            fsw,
+            fcw,
+            mode_vars,
             cfg,
             blocks: HashMap::new(),
             exits: HashMap::new(),
             dyn_block: None,
             missing: Vec::new(),
             xc: x87::Cache::default(),
-            xv,
-            xcw,
             joins: std::collections::HashSet::new(),
             rz: None,
             usual87: false,
@@ -406,6 +418,21 @@ impl<'a, 'f> Lifter<'a, 'f> {
             .ins()
             .load(I32, mf(), self.cpu, offset_of!(Cpu, top) as i32);
         self.b.def_var(self.top, t);
+        // TOP read anew: a cached run's later TOPs from this one
+        self.xc.base = None;
+        let sw = self
+            .b
+            .ins()
+            .load(I16, mf(), self.cpu, offset_of!(Cpu, fsw) as i32);
+        self.b.def_var(self.fsw, sw);
+        // (left out where nothing reads it)
+        let cw = self.b.ins().load(
+            I16,
+            mf().with_notrap(),
+            self.cpu,
+            offset_of!(Cpu, fcw) as i32,
+        );
+        self.set_fcw(cw);
     }
 
     fn store_state(&mut self) {
@@ -423,6 +450,10 @@ impl<'a, 'f> Lifter<'a, 'f> {
         self.b
             .ins()
             .store(mf(), t, self.cpu, offset_of!(Cpu, top) as i32);
+        let sw = self.b.use_var(self.fsw);
+        self.b
+            .ins()
+            .store(mf(), sw, self.cpu, offset_of!(Cpu, fsw) as i32);
     }
 
     fn reg(&mut self, k: usize) -> Value {
@@ -706,14 +737,11 @@ impl<'a, 'f> Lifter<'a, 'f> {
     }
 
     fn goto(&mut self, tgt: u32) {
-        self.x87_edge(tgt);
         let blk = self.target_block(tgt);
         self.b.ins().jump(blk, &[]);
     }
 
     fn branch(&mut self, c: Value, tgt: u32, next: u32) {
-        self.x87_edge(tgt);
-        self.x87_edge(next);
         let (t, n) = (self.target_block(tgt), self.target_block(next));
         self.b.ins().brif(c, t, &[], n, &[]);
     }
@@ -763,6 +791,55 @@ impl<'a, 'f> Lifter<'a, 'f> {
     }
 
     /// Run a host helper on the synced state.
+    /// rep movs (`copy`) or rep stos of `size`-byte elements as a loop in the code, element by
+    /// element as the CPU does (a copy onto a later part of its own source repeats a pattern).
+    /// The game's memcpy and memset: ~22 million mostly short ones in two minutes of Recoil,
+    /// each a call to `rt_string` with the state stored and loaded. Backwards (DF set) still
+    /// goes there.
+    fn rep_move(&mut self, copy: bool, size: u32, op: i64) {
+        let (head, body, back, done) = (
+            self.b.create_block(),
+            self.b.create_block(),
+            self.b.create_block(),
+            self.b.create_block(),
+        );
+        self.b.set_cold_block(back);
+        let df = self
+            .b
+            .ins()
+            .load(I8, mf(), self.cpu, offset_of!(Cpu, df) as i32);
+        self.b.ins().brif(df, back, &[], head, &[]);
+        self.b.switch_to_block(back);
+        self.helper(self.refs.string, Some(op));
+        self.b.ins().jump(done, &[]);
+        self.b.switch_to_block(head);
+        let n = self.reg(1);
+        self.b.ins().brif(n, body, &[], done, &[]);
+        self.b.switch_to_block(body);
+        let di = self.reg(7);
+        let v = if copy {
+            let si = self.reg(6);
+            let v = self.load(si, size);
+            let si = self.b.ins().iadd_imm_s(si, size as i64);
+            self.set_reg(6, si);
+            v
+        } else {
+            let a = self.reg(0);
+            if size == 4 {
+                a
+            } else {
+                self.b.ins().ireduce(ty(size), a)
+            }
+        };
+        self.store(di, v);
+        let di = self.b.ins().iadd_imm_s(di, size as i64);
+        self.set_reg(7, di);
+        let n = self.b.ins().iadd_imm_s(n, -1);
+        self.set_reg(1, n);
+        self.b.ins().jump(head, &[]);
+        self.b.switch_to_block(done);
+    }
+
     fn helper(&mut self, f: FuncRef, extra: Option<i64>) {
         self.store_state();
         match extra {
@@ -815,7 +892,6 @@ impl<'a, 'f> Lifter<'a, 'f> {
             .filter_map(|&a| direct_target(&code.at(a).unwrap()).filter(|&t| self.f.inside(t)))
             .collect();
         self.joins.insert(self.f.entry);
-        self.xc.carry_nothing(self.f.entry);
         // overlapping instructions (Watcom's `test ax, imm` hiding a `mov`): an instruction
         // reached by falling through from one that is not the one before it
         for w in addrs.windows(2) {
@@ -847,9 +923,6 @@ impl<'a, 'f> Lifter<'a, 'f> {
             let i = code.at(a).unwrap();
             let blk = self.blocks[&a];
             self.b.switch_to_block(blk);
-            if self.joins.contains(&a) {
-                self.x87_join(a);
-            }
             if heads.contains(&a) {
                 self.poll();
             }
@@ -1015,7 +1088,10 @@ impl<'a, 'f> Lifter<'a, 'f> {
                 }
                 self.emit(&code.at(a).unwrap());
             }
-            assert!(!self.near24, "a version's run ends with the cache written back");
+            assert!(
+                !self.near24,
+                "a version's run ends with the cache written back"
+            );
             self.blocks.extend(kept);
             self.b.switch_to_block(rest);
         }
@@ -1039,7 +1115,10 @@ impl<'a, 'f> Lifter<'a, 'f> {
                 }
                 self.emit(&code.at(a).unwrap());
             }
-            assert!(!self.usual87, "a version's run ends with the cache written back");
+            assert!(
+                !self.usual87,
+                "a version's run ends with the cache written back"
+            );
             self.blocks.extend(kept);
             self.b.switch_to_block(general);
         }
@@ -1083,20 +1162,10 @@ impl<'a, 'f> Lifter<'a, 'f> {
             None => self.insn(i),
         };
         if !ends {
-            if !self.xc.enabled && self.joins.contains(&i.next_ip32()) {
+            if self.joins.contains(&i.next_ip32()) {
                 self.x87_settle();
             }
             self.goto(i.next_ip32());
-        } else {
-            // what follows is reached by jumps only (they carry the cache), but for the way
-            // on of a conditional branch, which keeps the cache
-            let on = i.flow_control() == FlowControl::ConditionalBranch
-                && self.f.inside(i.next_ip32())
-                && self.blocks.contains_key(&i.next_ip32())
-                && !self.joins.contains(&i.next_ip32());
-            if !on {
-                self.x87_forget();
-            }
         }
     }
 
@@ -1118,15 +1187,7 @@ impl<'a, 'f> Lifter<'a, 'f> {
         let m = i.mnemonic();
         // the x87 cache stays over plain integer instructions; anything that may branch, call
         // or reach a helper writes it back first, on the one path all later code follows
-        // (a direct branch carries the cache to its targets: `x87_edge`)
-        let carried = self.carry87()
-            && matches!(
-                i.flow_control(),
-                FlowControl::ConditionalBranch | FlowControl::UnconditionalBranch
-            )
-            && direct_target(i).is_some()
-            && !self.smc.imm.contains_key(&i.ip32());
-        if (!plain(i) || i.flow_control() != FlowControl::Next) && !carried {
+        if !plain(i) || i.flow_control() != FlowControl::Next {
             self.x87_settle();
         }
         match i.flow_control() {
@@ -1580,7 +1641,12 @@ impl<'a, 'f> Lifter<'a, 'f> {
                 } else {
                     0
                 };
-                self.helper(self.refs.string, Some(kind | size << 4 | rep << 8));
+                let op = kind | size << 4 | rep << 8;
+                if rep == 1 && kind <= 1 {
+                    self.rep_move(kind == 0, size as u32, op);
+                } else {
+                    self.helper(self.refs.string, Some(op));
+                }
             }
         }
         false
@@ -2285,10 +2351,7 @@ fn flag_liveness(code: &mut crate::discover::Code, addrs: &[u32]) -> HashMap<u32
         let mut changed = false;
         for k in (0..info.len()).rev() {
             let (_, uses, defs, succ) = info[k];
-            let o = succ
-                .iter()
-                .flatten()
-                .fold(0, |s, t| s | live_in[index[t]]);
+            let o = succ.iter().flatten().fold(0, |s, t| s | live_in[index[t]]);
             let l = uses | (o & !defs);
             if (o, l) != (out[k], live_in[k]) {
                 (out[k], live_in[k]) = (o, l);

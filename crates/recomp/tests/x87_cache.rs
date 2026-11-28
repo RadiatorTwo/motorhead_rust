@@ -30,11 +30,21 @@ enum Op {
     Int(u32),
     /// a branch over a fxch st(1) (a join inside the loop)
     Skip,
+    /// one of two loads by a branch (a join with other values on its two edges)
+    Choose(u32),
+    /// a load on odd passes only, stored again by a second branch (joins with the stack one
+    /// deeper on one edge)
+    Uneven(u32),
     /// a branch over st(0) op= st(i) and a load and store (values written on one way only)
     SkipArith(u32, u32),
     /// fldcw of control word j of the data block's four (24 bits truncating or to nearest,
     /// 53 bits)
     Cw(u32),
+    /// fcom sti(i)
+    Com(u32),
+    /// fnstsw into status word j of the data block's eight: the condition codes and TOP in
+    /// the middle of a run (TOP from the run's first read, `Cache::base`)
+    Status(u32),
 }
 
 thread_local! {
@@ -46,7 +56,7 @@ fn sti(i: u32) -> AsmRegisterSt {
 }
 
 /// The data block: inputs (doubles at 0..128, dwords at 128..192, control words at 600),
-/// outputs from 256.
+/// outputs from 256 (status words at 616).
 fn prog(a: &mut CodeAssembler) -> Result<(), IcedError> {
     a.mov(eax, dword_ptr(esp + 4))?;
     a.mov(ecx, 3u32)?;
@@ -101,12 +111,38 @@ fn prog(a: &mut CodeAssembler) -> Result<(), IcedError> {
                 a.mov(dword_ptr(eax + 128 + 4 * ((j + 1) % 16)), edx)?;
             }
             Op::Cw(j) => a.fldcw(word_ptr(eax + 600 + 2 * j))?,
+            Op::Com(i) => a.fcom_2(st0, sti(i))?,
+            Op::Status(j) => a.fnstsw(word_ptr(eax + 616 + 2 * j))?,
             Op::Skip => {
                 let mut skip = a.create_label();
                 a.test(ecx, 1u32)?;
                 a.jz(skip)?;
                 a.fxch(st0, st1)?;
                 a.set_label(&mut skip)?;
+            }
+            Op::Choose(j) => {
+                let (mut other, mut join) = (a.create_label(), a.create_label());
+                a.test(ecx, 1u32)?;
+                a.jz(other)?;
+                a.fld(qword_ptr(eax + 8 * j))?;
+                a.jmp(join)?;
+                a.set_label(&mut other)?;
+                a.fld(st1)?;
+                a.fchs()?;
+                a.set_label(&mut join)?;
+            }
+            Op::Uneven(j) => {
+                let (mut l1, mut l2) = (a.create_label(), a.create_label());
+                a.test(ecx, 1u32)?;
+                a.jz(l1)?;
+                a.fld(qword_ptr(eax + 8 * j))?;
+                a.fmul_2(st0, st1)?;
+                a.set_label(&mut l1)?;
+                a.fadd_2(st1, st0)?;
+                a.test(ecx, 1u32)?;
+                a.jz(l2)?;
+                a.fstp(qword_ptr(eax + 256 + 8 * j))?;
+                a.set_label(&mut l2)?;
             }
             Op::SkipArith(k, i) => {
                 let mut skip = a.create_label();
@@ -152,16 +188,24 @@ fn random_ops(rng: &mut Rng) -> Vec<Op> {
             12 if depth > 3 => Op::StorePop(r(rng, 16)),
             13 => Op::StoreF32(r(rng, 16)),
             14 if depth > 3 => Op::PopTo(r(rng, depth)),
-            15 => match r(rng, 4) {
+            15 => match r(rng, 8) {
                 0 => Op::Skip,
-                3 => Op::SkipArith(r(rng, 3), r(rng, depth)),
+                5 if depth < 8 => Op::Choose(r(rng, 16)),
+                6 if depth < 8 => Op::Uneven(r(rng, 16)),
+                7 => Op::SkipArith(
+                    // (the load and store only below a full stack)
+                    r(rng, if depth < 8 { 3 } else { 2 }),
+                    r(rng, depth),
+                ),
                 1 => Op::Int(r(rng, 16)),
+                2 => Op::Com(r(rng, depth)),
+                3 => Op::Status(r(rng, 8)),
                 _ => Op::Cw(r(rng, 4)),
             },
             _ => continue,
         };
         match op {
-            Op::LoadMem(_) | Op::LoadInt(_) | Op::LoadSt(_) => depth += 1,
+            Op::LoadMem(_) | Op::LoadInt(_) | Op::LoadSt(_) | Op::Choose(_) => depth += 1,
             Op::ArithP(..) | Op::StorePop(_) | Op::PopTo(_) => depth -= 1,
             _ => {}
         }

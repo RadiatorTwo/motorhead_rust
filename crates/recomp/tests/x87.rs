@@ -385,7 +385,10 @@ fn x87_floats_to_nearest() {
             f as f64
         };
         let (x, y) = (v(), v());
-        g.call(7, &[dbl(x)[0], dbl(x)[1], dbl(y)[0], dbl(y)[1], cw, SCRATCH]);
+        g.call(
+            7,
+            &[dbl(x)[0], dbl(x)[1], dbl(y)[0], dbl(y)[1], cw, SCRATCH],
+        );
         let got = |k: u32| {
             f64::from_bits(u64::from_le_bytes(
                 m.slice(SCRATCH + 8 * k, 8).try_into().unwrap(),

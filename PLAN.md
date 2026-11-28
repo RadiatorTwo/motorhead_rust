@@ -60,20 +60,15 @@
   first). Test `x87_store_floats`. rec8: early 311-365 -> 335-415 fps, 0x456d4c 21.8% ->
   20.3%. Still to do there: the loops' x87 between branches (each loop head settles the
   cache and works out the mode again), or 0x456d4c in Rust (a session or more).
-- Lifter: the x87 cache goes over jumps (`x87_edge`, `x87_join` in lift/x87.rs): a join
-  gets ST(0..7) and the control word in Cranelift variables, as its first lifted jump had
-  them (ST(i) relative to TOP: the same on every way); the others give the same, memory gets
-  what the join does not carry. Was: everything written back before every jump, loaded
-  again after it (a loop's values went through memory each pass, the control word read and
-  its mode worked out again). `MOTORHEAD_NO_CARRY87=1` as before. Found on the way: an
-  instruction falling through to one that is not the next in the list (Watcom's
-  `test ax, imm` hiding a `mov`, 0x4c8f33) is a join now; `fcw` read in a side block was kept
-  in the cache (arith_rz); a version's loads at its end stayed in the cache for the next
-  version. Tests `x87_carry` (the game's loops, the overlap), `x87_cache` (a branch over
-  arithmetic, 1000 programs, NaNs compared as NaNs). The game now says which functions
-  Cranelift refused ("not compiled": they stop with "not supported yet" when called).
-  rec8: 0x456d4c 20.3% -> 18.4%, the GPU wait's share 11% -> 16%.
-- Traps found: switches such as `NO_CARRY87`, `NO_NEAR24` are not in the compiled code's
+- Lifter (2026-11-28): synced with recomp_kit both ways (three-way merge per file, base
+  97d9c36): from the kit rustcoil's x87 speed (TOP read once a run, status word and control
+  word in variables, rare rounding ways cold, rep movs as a loop; tests `alias.rs`,
+  `string.rs`); into the kit this port's 24-bit way, the 0x07f versions, float stores, the
+  overlapping instructions as joins, the "not compiled" warning. The x87 registers carried
+  over jumps (`x87_edge`) were dropped: beside the control word's variables no gain (2.18
+  against 2.28 ms a picture, as rustcoil found). Test `x87_loops` (the game's loops and the
+  overlap, cache on and off).
+- Traps found: switches such as `NO_NEAR24`, `NO_USUAL87` are not in the compiled code's
   key: delete `game_files/Motorhead/compiled.bin` between A/B runs (else the second loads
   the first's code). rec8's savestate is never loaded ("not loaded: this mission started
   otherwise (heap blocks)"), so the race follows the menu part's real-time input: race logs
