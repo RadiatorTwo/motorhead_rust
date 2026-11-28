@@ -36,7 +36,7 @@
 0x4bc497 Glide_Scene_BlurSet  return address of the scene's grConstantColorValue(0x80000000) with MotionBlur on (renderer +0x284): the scene is drawn at alpha 0x80 over the last picture, no clear (`blur.rs`); 0x4becc4 the same in 0x4bebcc
 0x43bd60 Control_Value  a task's control code (eax) active? strength 0..1 into [edx] (joystick axes analog, keys 1), ebx 1: only a new press (hooked: pad.rs)
 0x73ad18 control_tasks  the layout's control code per task, in the .clo order: TurnLeft, TurnRight, Accelerate, Brake, ShiftGearUp, ShiftGearDown, Horn, HandBrake, RearView, GameMenu, Info, ChatMode, InCarView, OutCarView, CameraView, RearMirror, CyclePlayers, ScreenShot
-0x43433c Joystick_Poll  DIJOYSTATE: buttons into 0x51c58c (dwords), axes minus their centre into 0x51c610 (x), 0x51c614 (y), 0x51c618 (z)
+0x43433c Joystick_Poll  DIJOYSTATE: buttons into 0x51c58c (dwords), axes minus their centre into 0x51c610 (x), 0x51c614 (y), 0x51c618 (z) (hooked: controls.rs puts the pad's buttons beyond the eighth in the key array after it)
 0x414ca4 Fpu_Single  the control word's precision to 24 bits, rounding kept (the renderer runs under 0x07f); 0x414cc8 back to 53 bits
 0x456d4c Render_Polygons  the 3D renderer's big loop (0x456d4c..0x458bec): faces of an object, their points through 0x414e54, ~25% of a race
 0x414e54 Project_Point  a point (edx) through the matrix (ebx) to the screen (eax: x, y, z, 1/w) with clip flags at [ecx] (1 left, 2 right, 4 top, 8 bottom, 0x10 too near, 0x20 behind); in Rust: src/project.rs (MOTORHEAD_CHECK_PROJECT=1 compares with the game's code)
@@ -49,3 +49,12 @@
 0x73ae14 g_music_volume  0 is off
 0x73ae18 g_music_again?  checked before CD_Again in the race frame, written nowhere (0 at a race)
 0x434170 Mouse_Poll  DirectInput mouse: movement into [0x51c56c], [0x51c570]; from 0x4c1738 (the cursor), once a menu frame (hooked: the menu's music again)
+0x46522c Input_Map  each frame: mouse, keyboard (0x4342f0), joystick (0x43433c) into the key array [0x51c3d4] (256 codes, 0x80 held; joystick buttons 0xf2 down to 0xeb, 8 at most, axes 0xf3..0xf8, mouse 0xe9, 0xea, 0xf9..0xff); with [0x737e74] = 1 the joystick works the menus (stick arrows, button 1 Enter, 2 Escape); then the new presses (with repeat) [0x737634 + 4 code], list 0x737d38
+0x4342f0 Keyboard_Poll  DirectInput keyboard into [0x51c3d4] (the whole array)
+0x465140 Input_MenuPad  edx -> [0x737e74] (joystick works the menus), eax -> [0x737e70] (the mouse too)
+0x46583c Input_NewPresses  eax: where the count goes; returns the list 0x737d38
+0x468150 Key_Name  al = code: GetKeyNameTextA, else the table 0x4dc710 (20 bytes a code: "JoyButton1" 0xf2, "UndefinedE2"...); the layout files (*.clo) keep these names (hooked: controls.rs, the pad's names on the control options' screen)
+0x4863ec Controls_Screen  the control options (layouts Custom, Joystick, Keyboard, Mouse, SteeringWheel; only Custom changeable)
+0x486a44 Controls_Assign  [0x7ddbfc] state (1 calibrate, 10 wait for release, 2 wait for a new press, 3 for its release), [0x7ddbf8] focus (0 layouts, 1 tasks)
+0x737e74 g_menu_pad  1: the joystick works the menus; 0 in the control options' assignment
+0x47bb24 Menu_Step  the options screens' slider step a frame: frame ms x 0.07 (x2 Shift, x4 Ctrl, x0.5 Alt), st0; the mouse speed moves 0.03 a step (hooked: controls.rs, a tap 1%, then a pause, then ramped)

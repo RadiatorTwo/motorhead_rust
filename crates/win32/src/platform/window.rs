@@ -206,9 +206,22 @@ pub fn pump(wait: Duration) {
             super::dinput::forget_presses();
             super::kernel32::set_guest_us(clock);
         }
-        // a pad's Start is the Escape key (pause)
-        if let Some(down) = super::dinput::poll() {
-            let (vk, scan) = vk_of(KeyCode::Escape).unwrap();
+        // a pad's Start is the Escape key (pause), or what the game says (Enter in its menus);
+        // let go as the key it went down as
+        if let Some((down, key)) = super::dinput::poll().and_then(|down| {
+            use crate::game::PadStart;
+            static START_KEY: Mutex<Option<KeyCode>> = Mutex::new(None);
+            let mut k = START_KEY.lock().unwrap();
+            if down {
+                *k = match crate::game::game().pad_start() {
+                    PadStart::Escape => Some(KeyCode::Escape),
+                    PadStart::Enter => Some(KeyCode::Enter),
+                    PadStart::Nothing => None,
+                };
+            }
+            k.map(|key| (down, key))
+        }) {
+            let (vk, scan) = vk_of(key).unwrap();
             h.app.input.push_back(Input::Key {
                 vk,
                 scan,

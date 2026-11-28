@@ -9,10 +9,11 @@
 //! - In a race the pad's controls answer for the tasks besides the layout's own: the left
 //!   stick (and the D-pad) steers (squared: the user found it twitchy linear), RT accelerates, LT brakes, all analog; RB/LB change gear,
 //!   A handbrake, B horn, Y rear view, X the camera.
+//! - A layout's joystick buttons 1 and 2 (ours: RT, LT) give the triggers' strength (analog).
 //! - In the menus the game takes the pad's first button (ours: RT) to confirm: there A is
-//!   reported as the first button and B as the second, the triggers as nothing.
-//!
-//! Start is Escape (the kit's), the game's menu in a race.
+//!   reported as the first button and B as the second, the triggers as nothing; not in the
+//!   control options' assignment (the game's `MENU_PAD` 0 there), which sees the buttons as
+//!   the race does. The rest of the menus' pad: `controls.rs`.
 
 use recomp::rt::{Cpu, EAX, EBX, EDX, call_original};
 use recomp::ver::Us;
@@ -21,6 +22,9 @@ use win32::platform::{dinput, mem};
 
 /// The game's question for one task (see the module's head).
 pub const CONTROL_VALUE: Us = Us(0x43bd60);
+/// 1: the joystick works the menus (its first button Enter); 0 in the control options'
+/// assignment.
+const MENU_PAD: Us = Us(0x737e74);
 /// The control codes of the tasks, in the layout's order.
 const TASKS: Us = Us(0x73ad18);
 
@@ -71,6 +75,16 @@ fn strength(t: u32, p: &dinput::Pad) -> f32 {
     }
 }
 
+/// Whether a task of the layout is bound to the game's key code `key` (a keyboard code: 0x200
+/// and the code in the low byte).
+pub fn layout_uses(key: u8) -> bool {
+    let m = mem();
+    (0..COUNT).any(|t| {
+        let code = m.rd32(TASKS.at() + 4 * t);
+        code & 0x200 != 0 && code & 0xff == key as u32
+    })
+}
+
 /// Each task's pad state at its last question (for "only a new press").
 static HELD: Mutex<[bool; COUNT as usize]> = Mutex::new([false; COUNT as usize]);
 
@@ -85,7 +99,14 @@ pub fn control_value(c: &mut Cpu) {
     let Some(t) = (0..COUNT).find(|&t| m.rd32(TASKS.at() + 4 * t) == code) else {
         return;
     };
-    let v = strength(t, &dinput::current_pad(0));
+    let p = dinput::current_pad(0);
+    // a joystick code (0x400) of button 1 or 2: the trigger's strength
+    let trigger = match code & 0x400 != 0 {
+        true if code & 0x10_0000 != 0 => p.triggers[0],
+        true if code & 0x20_0000 != 0 => p.triggers[1],
+        _ => 0.0,
+    };
+    let v = strength(t, &p).max(trigger);
     let mut held = HELD.lock().unwrap();
     let was = std::mem::replace(&mut held[t as usize], v > 0.0);
     if v <= 0.0 || (new_only && was) {
@@ -102,7 +123,7 @@ pub fn control_value(c: &mut Cpu) {
 
 /// The buttons the game sees: in the menus A first and B second.
 pub fn buttons(buttons: u32) -> u32 {
-    if crate::frames::in_race() {
+    if crate::frames::in_race() || mem().rd32(MENU_PAD.at()) != 1 {
         return buttons;
     }
     let bit = |k: u32| buttons >> k & 1;

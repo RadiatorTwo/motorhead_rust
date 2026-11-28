@@ -15,6 +15,7 @@ mod sprites;
 mod wide;
 mod blur;
 mod pad;
+mod controls;
 mod project;
 mod fpu;
 mod polygons;
@@ -90,6 +91,10 @@ impl Game for MyGame {
 
     fn pad_buttons(&self, _n: u32, buttons: u32) -> u32 {
         pad::buttons(buttons)
+    }
+
+    fn pad_start(&self) -> win32::PadStart {
+        controls::pad_start()
     }
 
     fn smc(&self) -> SmcSpec {

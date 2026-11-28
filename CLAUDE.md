@@ -84,6 +84,8 @@ boundaries (`data/functions.json`) and our notes by address (`data/symbols.txt`)
   `src/polygons.rs` 0x456d4c, its common ways, the game's function for the rest
   (`MOTORHEAD_CHECK_POLYGONS=n`: every n-th call on a memory copy; the window looks hung
   then). `src/fpu.rs`: x87 rounding as the lifter does it, for such code.
+- `src/pad.rs` the pad in a race (analog steering, gas, brake), `src/controls.rs`
+  the pad and mouse in the game's menus and its control options (key array 0x51c3d4).
 - `src/loaded.rs` the interpreter for loaded code; `src/font.rs`, `src/sprites.rs` the
   replaced drawers (each the game's loop, registers carried as in the original).
 - Framework changes made here (not yet in recomp_kit, see PLAN.md "Kit"): Watcom sections

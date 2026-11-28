@@ -17,8 +17,37 @@ Next, in this order:
    The menu (no such check in the game) the same after the mouse's poll 0x434170 (once a
    menu frame). Tested with the length cut to 10 s (local only): race (rec8) track 4 and
    menu track 3 again every 10 s.
-3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
-4. The depth read's remaining wait (~5%), then the next hot functions (0x4bc2f8 Glide_Scene,
+3. Issue #3 (2026-11-28, no text): "analog triggers still not working". To ask: the pad,
+   system, version and motorhead.log. The log now always has each pad once (`dinput.rs`
+   `describe`: name, vendor/product, gilrs' mapping, the codes of RT/LT and of the axes
+   LeftZ/RightZ), the first move of each trigger and each input gilrs does not know (an
+   axis we do not read). The user's Xbox One pad: RT Axis(4), LT Axis(3) (analog buttons).
+   If his triggers are axes: read LeftZ/RightZ too. Kit: the log also into recomp_kit.
+   Controls (2026-11-28, the user: in the game's control options the D-pad, the triggers,
+   Select and other buttons could not be assigned; the mouse should not work the menus):
+   - The game reads 8 joystick buttons. `controls.rs`: after its joystick poll our buttons
+     8..14 (Back, R3, L3, D-pad) go into its key array as its unused codes 0xe2..0xe8
+     ("UndefinedE2"..: the .clo files keep these names); on the control options' screen
+     every pad code shows as "Pad A", "Pad Up", "Stick Left"... (0x468150 hooked by
+     return address). In the assignment ([0x737e74] = 0) the buttons are reported as in the
+     race (`pad::buttons`), not A/B first. A layout's joystick buttons 1/2 (RT/LT) give the
+     triggers' strength (`pad::control_value`).
+   - Menus: D-pad the arrows, Back (Select) Escape, Start Enter (kit: `Game::pad_start` /
+     `PadStart`; Escape in a race and videos, in a race nothing when the layout gives Start a
+     task; nothing as a key while the control options assign: there Start is the game's
+     unused code 0xe1, "Pad Start", was "Return"; tested). Sliders (0x47bb24 hooked): the game moved ~3.5% a frame, over
+     20% in a tap (the user could not set 100%); now a tap is 1% (mouse speed), then 350 ms
+     nothing, then 20% of the game's speed up to all of it in 1 s. Tested: taps 1% each. The mouse never works the menus (the user: a move alone
+     changed settings; an F10 switch, on by default, was dropped): its movement and buttons
+     zeroed after its poll outside a race; tested: scripted moves turn the main menu's needle
+     without, not with it. (A pad binding page in F10 was
+     built and dropped: the user assigns in the game's control options.)
+   - Tested with the scripted pad: Back and D-pad down assigned (shown "Pad Back", "Pad
+     Down"), X as "JoyButton5" before; D-pad, Start, Select in the menus. Not tested: a race
+     with a layout using 0xe2..0xe8 (the game's keyboard way, [0x51c3d4 + code]), a real pad's triggers in the assignment. Kit: `pad_start` and the
+     pad log also into recomp_kit.
+4. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
+5. The depth read's remaining wait (~5%), then the next hot functions (0x4bc2f8 Glide_Scene,
    0x455e40, 0x414b68).
 
 All below is committed (250515c, 9f91d2a) and pushed, the lifter also in recomp_kit

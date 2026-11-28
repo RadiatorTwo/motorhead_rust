@@ -14,5 +14,5 @@ pub mod run;
 pub mod setup;
 pub mod splash;
 
-pub use game::{After, Cheat, DialogExt, Game, GlideExt, Identity, Menu};
+pub use game::{After, Cheat, DialogExt, Game, GlideExt, Identity, Menu, PadStart};
 pub use run::run;

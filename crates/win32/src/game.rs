@@ -58,6 +58,14 @@ pub struct Identity {
 
 /// A game's own behaviour on top of the platform layer. Addresses are in the version that
 /// runs (`recomp::ver::Us::at`).
+/// The key the pad's Start is (`Game::pad_start`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PadStart {
+    Escape,
+    Enter,
+    Nothing,
+}
+
 pub trait Game: Sync {
     fn identity(&self) -> &'static Identity;
 
@@ -117,6 +125,12 @@ pub trait Game: Sync {
     /// takes the first button).
     fn pad_buttons(&self, _n: u32, buttons: u32) -> u32 {
         buttons
+    }
+
+    /// What the pad's Start is now: Escape (a game's pause), Enter (its menus) or nothing
+    /// (while it waits for a control to assign).
+    fn pad_start(&self) -> PadStart {
+        PadStart::Escape
     }
 
     /// Whether a video plays (the pad's A is Space then: skips it).
