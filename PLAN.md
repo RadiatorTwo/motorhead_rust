@@ -10,7 +10,7 @@ Next, in this order:
    called from Rust). Done: the reflection (0x45839e), mode 2 (0x45778e), the near plane cut
    (0x458794). Each way: write it, `MOTORHEAD_CHECK_POLYGONS=2000` on rec8 (0 differ),
    the ways' counts in the check's summary (which way is still the game's).
-2. A release for issue #1's reporter (ask for motorhead.log: both refresh rates).
+2. Issue #1: v0.3.3 out (2026-11-28); ask its reporter to try it and send motorhead.log (both refresh rates).
 3. A new recording whose savestate loads (rec8's does not): bit-exact race logs again.
 4. The depth read's remaining wait (~5%), then the next hot functions (0x4bc2f8 Glide_Scene,
    0x455e40, 0x414b68).
@@ -233,7 +233,7 @@ Framework in `crates/`: copied from recomp_kit 29f5eb9 2026-11-25, brought up to
   second button (the game confirms with the first: was RT). Kit: `Game::pad_buttons`,
   `Pad::triggers` (analog, recorded as `pad@RT=0.4`). Tested with the scripted pad: RT 0.4
   gives 40 mph where full gives 117. The user: menu with A works, analog fine; steering squared (linear was twitchy).
-- [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27)
+- [x] release (tag `v*`): v0.3.0, v0.3.1, v0.3.2 (2026-11-27), v0.3.3 (2026-11-28)
 - [x] Linux under Wayland hung at the loading screen (2026-11-27): EGL lets the window's
   surface be current in one thread only; the present thread's shared context got
   EGL_BAD_ACCESS and died at the first Glide picture. Off Windows a context now holds the
