@@ -88,6 +88,11 @@ impl Pad {
     pub fn buttons(&self) -> u32 {
         self.buttons
     }
+
+    /// Start held.
+    pub fn start(&self) -> bool {
+        self.start
+    }
 }
 
 /// A connected pad: its state, the buttons pressed since the game last read it (a short press
@@ -196,6 +201,58 @@ fn read(g: &gilrs::Gamepad) -> Pad {
     }
 }
 
+/// True the first time `key` is asked (what the log tells once).
+fn once(key: String) -> bool {
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap();
+    !seen.contains(&key) && {
+        seen.push(key);
+        true
+    }
+}
+
+/// Into the log once per pad (always: for reports of pads that do not work): its name, how
+/// gilrs maps it and what its triggers are (analog buttons, which we read, or axes).
+fn describe(id: usize, p: &gilrs::Gamepad) {
+    let code = |c: Option<gilrs::ev::Code>| c.map_or("none".to_string(), |c| c.to_string());
+    let hex = |v: Option<u16>| v.map_or("?".to_string(), |v| format!("{v:04x}"));
+    log!(
+        "pad {id}: {} (system: {}, vendor {} product {}, mapping {:?}): RT {}, LT {}, axes LeftZ {}, RightZ {}",
+        p.name(),
+        p.os_name(),
+        hex(p.vendor_id()),
+        hex(p.product_id()),
+        p.mapping_source(),
+        code(p.button_code(Button::RightTrigger2)),
+        code(p.button_code(Button::LeftTrigger2)),
+        code(p.axis_code(Axis::LeftZ)),
+        code(p.axis_code(Axis::RightZ)),
+    );
+}
+
+/// Into the log the first time a pad's trigger moves and each input gilrs does not know (a
+/// trigger that is no analog button shows here).
+fn log_event(id: usize, e: &gilrs::EventType) {
+    use gilrs::EventType::{AxisChanged, ButtonChanged};
+    match *e {
+        ButtonChanged(b @ (Button::RightTrigger2 | Button::LeftTrigger2), v, _)
+            if v > 0.1 && once(format!("{id} {b:?}")) =>
+        {
+            log!("pad {id}: {b:?} moves (analog, {v:.2})")
+        }
+        AxisChanged(a @ (Axis::LeftZ | Axis::RightZ), v, c) if once(format!("{id} {a:?}")) => {
+            log!("pad {id}: axis {a:?} ({c}) moves ({v:.2}): not read")
+        }
+        AxisChanged(Axis::Unknown, v, c) if once(format!("{id} axis {c}")) => {
+            log!("pad {id}: unknown axis {c} moves ({v:.2}): not read")
+        }
+        ButtonChanged(Button::Unknown, v, c) if once(format!("{id} button {c}")) => {
+            log!("pad {id}: unknown button {c} ({v:.2}): not read")
+        }
+        _ => {}
+    }
+}
+
 fn new_gilrs() -> Option<&'static mut Gilrs> {
     let g = Gilrs::new()
         .map_err(|e| log!("warn: no gamepads: {e}"))
@@ -250,6 +307,7 @@ fn update() {
                     pad_log!("disconnected: {}", g.gamepad(e.id).name())
                 }
                 ref ev => {
+                    log_event(e.id.into(), ev);
                     if let Some(b) = pressed_by(e.id.into(), ev) {
                         pressed.push((e.id.into(), 1 << b));
                     }
@@ -258,6 +316,9 @@ fn update() {
         }
         now.extend(g.gamepads().map(|(id, p)| {
             let id: usize = id.into();
+            if once(format!("pad {id}")) {
+                describe(id, &p);
+            }
             let pad = read(&p);
             let new = pressed.iter().filter(|e| e.0 == id).fold(0, |a, e| a | e.1);
             Entry {
